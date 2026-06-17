@@ -5,20 +5,40 @@ import '../habits/habit_repository.dart';
 class PredictionResult {
   final double percentage;
   final String insightText;
+  final int loggedDaysCount;
 
-  PredictionResult(this.percentage, this.insightText);
+  PredictionResult(this.percentage, this.insightText, {this.loggedDaysCount = 7});
 }
 
 final predictionProvider = FutureProvider<PredictionResult>((ref) async {
   final logRepo = ref.watch(logRepositoryProvider);
-  final logs = await logRepo.getLogs();
+  final allLogs = await logRepo.getLogs();
   final habitRepo = ref.watch(habitRepositoryProvider);
   final habits = await habitRepo.getHabits();
 
-  if (logs.length < 5) {
+  final activeHabitIds = habits.map((h) => h.idHabit).toSet();
+  final logs = allLogs.where((log) => activeHabitIds.contains(log.idHabit)).toList();
+
+  final loggedDays = logs.map((l) {
+    if (l.timestamp != null) {
+      return DateTime(l.timestamp!.year, l.timestamp!.month, l.timestamp!.day);
+    }
+    return null;
+  }).whereType<DateTime>().toSet();
+
+  final int loggedDaysCount = loggedDays.length;
+
+  if (loggedDaysCount == 0) {
     return PredictionResult(
-      50.0,
-      'Data sedang dikumpulkan. Tetap konsisten untuk mengaktifkan prediksi cerdas!',
+      0.0,
+      'Mulai centang habit pertamamu hari ini untuk melatih AI.',
+      loggedDaysCount: 0,
+    );
+  } else if (loggedDaysCount < 7) {
+    return PredictionResult(
+      0.0,
+      'AI sedang mempelajari polamu. Terus konsisten! (${7 - loggedDaysCount} hari lagi menuju insight pertama)',
+      loggedDaysCount: loggedDaysCount,
     );
   }
 
@@ -35,7 +55,7 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
       }).toList();
 
       final completedToday =
-          todayLogs.map((e) => e.idHabit).toSet().length;
+          todayLogs.where((e) => e.idHabit != null).map((e) => e.idHabit).toSet().length;
 
       final totalHabits = habits.length;
 
@@ -57,6 +77,10 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
 
   int successOnMood = 0;
   int failOnMood = 0;
+
+  final int lastBusy = logs.isNotEmpty ? logs.first.busyLevel : 3;
+  int successOnBusy = 0;
+  int failOnBusy = 0;
 
   for (var log in logs) {
     bool isSuccess = log.status;
@@ -96,10 +120,19 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
         failOnMood++;
       }
     }
+
+    // Busy
+    if (log.busyLevel == lastBusy) {
+      if (isSuccess) {
+        successOnBusy++;
+      } else {
+        failOnBusy++;
+      }
+    }
   }
 
   final int totalLogs = totalSuccess + totalFail;
-  if (totalLogs == 0) return PredictionResult(50.0, 'Belum ada data.');
+  if (totalLogs == 0) return PredictionResult(0.0, 'Belum ada cukup data untuk prediksi hari ini.');
 
   // Prior Probabilities
   double priorSuccess = totalSuccess / totalLogs;
@@ -116,9 +149,12 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
   double lMoodSuccess = (successOnMood + 1) / (totalSuccess + 5);
   double lMoodFail = (failOnMood + 1) / (totalFail + 5);
 
+  double lBusySuccess = (successOnBusy + 1) / (totalSuccess + 5);
+  double lBusyFail = (failOnBusy + 1) / (totalFail + 5);
+
   // Posterior Probabilities
-  double postSuccess = priorSuccess * lDaySuccess * lTimeSuccess * lMoodSuccess;
-  double postFail = priorFail * lDayFail * lTimeFail * lMoodFail;
+  double postSuccess = priorSuccess * lDaySuccess * lTimeSuccess * lMoodSuccess * lBusySuccess;
+  double postFail = priorFail * lDayFail * lTimeFail * lMoodFail * lBusyFail;
 
   double percentage = focusScore.toDouble();
 
@@ -132,19 +168,16 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
           percentage = percentage.clamp(0.0, 100.0).toDouble();
     }
 
-  // Insight Generation (Identify the lowest likelihood factor for success)
-  String insightText = 'Insight: Anda berada di jalur yang tepat! Pertahankan kebiasaan baik ini.';
+  // Insight Generation
+  String insightText = '';
   
-  if (lMoodSuccess < lDaySuccess && lMoodSuccess < lTimeSuccess) {
-    insightText = 'Insight: Mood Anda saat ini berpotensi menurunkan peluang sukses. Tetap semangat dan jangan menyerah!';
-  } else if (lTimeSuccess < lDaySuccess && lTimeSuccess < lMoodSuccess) {
-    String timeStr = isMorning ? 'Pagi' : 'Sore/Malam';
-    insightText = 'Insight: Anda biasanya kurang produktif di waktu $timeStr. Cobalah ubah strategi Anda!';
-  } else if (lDaySuccess < lTimeSuccess && lDaySuccess < lMoodSuccess) {
-    List<String> days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
-    String dayStr = days[currentDay - 1];
-    insightText = 'Insight: Hari $dayStr tampaknya menjadi tantangan buat Anda. Fokus lebih ekstra hari ini!';
+  if (percentage >= 70.0) {
+    insightText = 'Insight: Konsistensi Anda luar biasa! Prediksi peluang sukses hari ini sangat tinggi.';
+  } else if (percentage >= 40.0) {
+    insightText = 'Insight: Hari ini mungkin terasa cukup padat. Fokus selesaikan 2 habit prioritas Anda terlebih dahulu.';
+  } else {
+    insightText = 'Insight: Performa sedang menurun. Jangan menyerah, mulai dengan satu langkah kecil hari ini!';
   }
 
-  return PredictionResult(percentage, insightText);
+  return PredictionResult(percentage, insightText, loggedDaysCount: loggedDaysCount);
 });

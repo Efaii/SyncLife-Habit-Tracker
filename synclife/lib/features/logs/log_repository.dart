@@ -16,20 +16,56 @@ class LogRepository {
 
   // CREATE
   Future<LogModel> createLog(LogModel log) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
+    final insertPayload = {
+      if (log.idHabit != null) 'id_habit': log.idHabit,
+      if (log.habitName != null) 'habit_name': log.habitName,
+      'user_id': userId,
+      'mood_level': log.moodLevel,
+      'busy_level': log.busyLevel,
+      'status': log.status ? 1 : 0,
+      if (log.timestamp != null) 'timestamp': log.timestamp!.toIso8601String(),
+    };
+
     final response = await _supabase
         .from(_tableName)
-        .insert(log.toJson())
+        .insert(insertPayload)
         .select()
         .single();
         
     return LogModel.fromJson(response);
   }
 
+  // DELETE TODAY LOG
+  Future<void> deleteTodayLog(String idHabit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
+    final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999).toIso8601String();
+
+    await _supabase
+        .from(_tableName)
+        .delete()
+        .eq('user_id', userId)
+        .eq('id_habit', idHabit)
+        .gte('timestamp', startOfDay)
+        .lte('timestamp', endOfDay);
+  }
+
   // READ ALL
   Future<List<LogModel>> getLogs() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return [];
+
     final response = await _supabase
         .from(_tableName)
         .select()
+        .eq('user_id', userId)
+        .not('habit_name', 'is', null)
         .order('timestamp', ascending: false);
     
     return response.map((json) => LogModel.fromJson(json)).toList();
@@ -37,10 +73,15 @@ class LogRepository {
 
   // READ BY HABIT ID
   Future<List<LogModel>> getLogsByHabitId(String idHabit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return [];
+
     final response = await _supabase
         .from(_tableName)
         .select()
         .eq('id_habit', idHabit)
+        .eq('user_id', userId)
+        .not('habit_name', 'is', null)
         .order('timestamp', ascending: false);
     
     return response.map((json) => LogModel.fromJson(json)).toList();
@@ -48,10 +89,14 @@ class LogRepository {
 
   // READ SINGLE
   Future<LogModel> getLogById(String idLog) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     final response = await _supabase
         .from(_tableName)
         .select()
         .eq('id_log', idLog)
+        .eq('user_id', userId)
         .single();
     
     return LogModel.fromJson(response);
@@ -63,10 +108,22 @@ class LogRepository {
       throw Exception('Cannot update log without id_log');
     }
     
+    final updatePayload = {
+      if (log.idHabit != null) 'id_habit': log.idHabit,
+      'mood_level': log.moodLevel,
+      'busy_level': log.busyLevel,
+      'status': log.status ? 1 : 0,
+      if (log.timestamp != null) 'timestamp': log.timestamp!.toIso8601String(),
+    };
+
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     final response = await _supabase
         .from(_tableName)
-        .update(log.toJson())
+        .update(updatePayload)
         .eq('id_log', log.idLog!)
+        .eq('user_id', userId)
         .select()
         .single();
         
@@ -75,15 +132,23 @@ class LogRepository {
 
   // DELETE
   Future<void> deleteLog(String idLog) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     await _supabase
         .from(_tableName)
         .delete()
-        .eq('id_log', idLog);
+        .eq('id_log', idLog)
+        .eq('user_id', userId);
   }
   Future<void> deleteLogsByHabitId(String idHabit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
   await _supabase
       .from(_tableName)
       .delete()
-      .eq('id_habit', idHabit);
+      .eq('id_habit', idHabit)
+      .eq('user_id', userId);
   }
 }

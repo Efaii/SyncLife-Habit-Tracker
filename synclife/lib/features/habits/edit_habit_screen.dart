@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../models/habit_model.dart';
 import 'habit_repository.dart';
 import '../home/dashboard_screen.dart'; // For habitsFutureProvider
+import '../../utils/ui_helper.dart';
+import 'widgets/icon_color_picker.dart';
 
 class EditHabitScreen extends ConsumerStatefulWidget {
   final HabitModel habit;
@@ -23,16 +25,6 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
   late String _selectedIcon;
   late String _selectedColor; 
   bool _isLoading = false;
-
-  final List<String> _icons = ['🏃‍♂️', '💧', '📚', '🧘‍♀️', '🍎', '💻', '😴', '📝', '🎸', '🧹'];
-  final List<String> _colors = [
-    '#673AB7', // Deep Purple
-    '#2196F3', // Blue
-    '#4CAF50', // Green
-    '#FF9800', // Orange
-    '#F44336', // Red
-    '#E91E63', // Pink
-  ];
 
   @override
   void initState() {
@@ -53,6 +45,16 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
         minute: int.tryParse(parts[1]) ?? 0
       );
     }
+
+    // Trigger UI refresh to ensure grid re-renders with correct initial DB values
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _selectedIcon = widget.habit.ikon;
+          _selectedColor = widget.habit.warnaTag;
+        });
+      }
+    });
   }
 
   bool get hasChanges {
@@ -84,9 +86,7 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
   void _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedTime == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih target waktu terlebih dahulu'), backgroundColor: Colors.orange),
-      );
+      UIHelper.showErrorSnackbar(context, 'Pilih target waktu terlebih dahulu');
       return;
     }
 
@@ -113,20 +113,12 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Kebiasaan berhasil diperbarui!', style: GoogleFonts.inter()),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        UIHelper.showSuccessSnackbar(context, 'Kebiasaan berhasil diperbarui!');
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+        UIHelper.showErrorSnackbar(context, 'Error: $e');
       }
     }
   }
@@ -137,9 +129,7 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
       initialTime: _selectedTime ?? TimeOfDay.now(),
       builder: (context, child) {
         return Theme(
-          data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(primary: Colors.indigo),
-          ),
+          data: Theme.of(context),
           child: child!,
         );
       },
@@ -151,25 +141,23 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
     }
   }
 
-  Color _hexToColor(String hexString) {
-    final buffer = StringBuffer();
-    if (hexString.length == 6 || hexString.length == 7) buffer.write('ff');
-    buffer.write(hexString.replaceFirst('#', ''));
-    return Color(int.parse(buffer.toString(), radix: 16));
-  }
+
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = theme.colorScheme.onSurface;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
           'Edit Kebiasaan',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: Colors.indigo),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: theme.colorScheme.primary),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.indigo),
+        iconTheme: IconThemeData(color: theme.colorScheme.primary),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -178,13 +166,13 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Nama Kebiasaan', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
+              Text('Nama Kebiasaan', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16, color: textColor)),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _nameController,
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: Colors.grey.shade50,
+                  fillColor: theme.brightness == Brightness.dark ? Colors.grey.shade900 : Colors.grey.shade50,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -203,36 +191,11 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
               ),
               const SizedBox(height: 28),
               
-              Text('Pilih Ikon', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 64,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _icons.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final icon = _icons[index];
-                    final isSelected = _selectedIcon == icon;
-                    return GestureDetector(
-                      onTap: () => setState(() => _selectedIcon = icon),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 64,
-                        decoration: BoxDecoration(
-                          color: isSelected ? Colors.indigo.withValues(alpha: 0.1) : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isSelected ? Colors.indigo : Colors.grey.shade200,
-                            width: isSelected ? 2 : 1,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(icon, style: const TextStyle(fontSize: 28)),
-                      ),
-                    );
-                  },
-                ),
+              IconAndColorPicker(
+                selectedIcon: _selectedIcon,
+                selectedColor: _selectedColor,
+                onIconSelected: (val) => setState(() => _selectedIcon = val),
+                onColorSelected: (val) => setState(() => _selectedColor = val),
               ),
               const SizedBox(height: 28),
 
@@ -244,21 +207,21 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
+                    color: theme.cardColor,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(color: theme.dividerColor),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.access_time_rounded, color: Colors.indigo),
+                      Icon(Icons.access_time_rounded, color: theme.colorScheme.primary),
                       const SizedBox(width: 12),
                       Text(
                         _selectedTime != null 
                             ? '${_selectedTime!.hour.toString().padLeft(2, '0')}:${_selectedTime!.minute.toString().padLeft(2, '0')}'
-                            : 'Pilih waktu...',
+                            : 'Pilih waktu',
                         style: GoogleFonts.inter(
-                          fontSize: 16, 
-                          color: _selectedTime != null ? Colors.black87 : Colors.grey.shade500,
+                          fontSize: 16,
+                          color: _selectedTime != null ? textColor : theme.disabledColor,
                         ),
                       ),
                     ],
@@ -267,34 +230,7 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
               ),
               const SizedBox(height: 28),
 
-              Text('Warna Tag', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: _colors.map((hex) {
-                  final isSelected = _selectedColor == hex;
-                  return GestureDetector(
-                    onTap: () => setState(() => _selectedColor = hex),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: _hexToColor(hex),
-                        shape: BoxShape.circle,
-                        border: isSelected ? Border.all(color: Colors.black87, width: 3) : null,
-                        boxShadow: [
-                          BoxShadow(
-                            color: _hexToColor(hex).withValues(alpha: 0.4),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 20) : null,
-                    ),
-                  );
-                }).toList(),
-              ),
+              // Removed old color selector
               const SizedBox(height: 48),
 
               SizedBox(
