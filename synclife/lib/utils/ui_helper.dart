@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 class UIHelper {
   static void showSuccessSnackbar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -22,11 +23,13 @@ class UIHelper {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         elevation: 4,
+        duration: const Duration(milliseconds: 1500),
       ),
     );
   }
 
   static void showErrorSnackbar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -46,6 +49,7 @@ class UIHelper {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         elevation: 4,
+        duration: const Duration(milliseconds: 1500),
       ),
     );
   }

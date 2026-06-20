@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../home/main_screen.dart';
 import 'login_screen.dart';
 import '../../widgets/adaptive_logo.dart';
@@ -33,6 +34,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _navigateToNextScreen() async {
+    // Precache logos into memory while waiting
+    const darkLoader = SvgAssetLoader('assets/images/Logo SyncLife Dark.svg');
+    const lightLoader = SvgAssetLoader('assets/images/Logo SyncLife Light.svg');
+    svg.cache.putIfAbsent(darkLoader.cacheKey(null), () => darkLoader.loadBytes(null));
+    svg.cache.putIfAbsent(lightLoader.cacheKey(null), () => lightLoader.loadBytes(null));
+
     // Wait for 2 seconds
     await Future.delayed(const Duration(seconds: 2));
 

@@ -18,11 +18,23 @@ class AuthRepository {
   AuthRepository(this._supabase);
 
   Future<AuthResponse> signUpWithEmail(String email, String password) async {
-    return await _supabase.auth.signUp(email: email, password: password);
+    final defaultName = email.split('@')[0];
+    return await _supabase.auth.signUp(
+      email: email, 
+      password: password,
+      data: {'full_name': defaultName},
+    );
   }
 
   Future<AuthResponse> signInWithEmail(String email, String password) async {
-    return await _supabase.auth.signInWithPassword(email: email, password: password);
+    try {
+      return await _supabase.auth.signInWithPassword(email: email, password: password);
+    } on AuthException catch (e) {
+      if (e.message.toLowerCase().contains('invalid login credentials')) {
+        throw AuthException('Email atau kata sandi tidak cocok, atau akun belum terdaftar.', statusCode: e.statusCode);
+      }
+      rethrow;
+    }
   }
 
   Future<void> signInWithGoogle() async {

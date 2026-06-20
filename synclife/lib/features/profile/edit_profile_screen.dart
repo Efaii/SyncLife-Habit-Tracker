@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_provider.dart';
 import '../home/main_screen.dart'; // for bottomNavIndexProvider
@@ -34,7 +35,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   String _initialName = '';
   String _initialBio = '';
   
-
+  Uint8List? _localImageBytes;
+  bool _hasUnsavedImage = false;
 
   @override
   void initState() {
@@ -68,8 +70,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
   void _onTextChanged() {
     final hasChanges = _nameController.text != _initialName || _bioController.text != _initialBio;
-    if (_hasUnsavedChanges != hasChanges) {
-      setState(() => _hasUnsavedChanges = hasChanges);
+    // Note: _hasUnsavedImage is handled independently
+    if (_hasUnsavedChanges != (hasChanges || _hasUnsavedImage)) {
+      setState(() => _hasUnsavedChanges = (hasChanges || _hasUnsavedImage));
     }
   }
 
@@ -80,12 +83,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     super.dispose();
   }
 
-  Future<void> _pickAndUploadImage() async {
+  Future<void> _pickImageForPreview() async {
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
     if (image == null) return;
-
-    setState(() => _isLoading = true);
 
     try {
       var bytes = await image.readAsBytes();
@@ -95,67 +96,79 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         minHeight: 500,
         quality: 70,
       );
-      bytes = compressed;
-      
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
-      
-      final fileName = '${user.id}_avatar.png'; 
-      
-      await _supabase.storage.from('avatars').uploadBinary(
-        'public/$fileName',
-        bytes,
-        fileOptions: const FileOptions(upsert: true, contentType: 'image/png'),
-      );
-      
-      final publicUrl = _supabase.storage.from('avatars').getPublicUrl('public/$fileName');
-      final uniqueAvatarUrl = '$publicUrl?v=${DateTime.now().millisecondsSinceEpoch}';
-      
-      final oldAvatarUrl = ref.read(profileProvider).value?.avatarUrl;
-      if (oldAvatarUrl != null && oldAvatarUrl.isNotEmpty) {
-        await CachedNetworkImage.evictFromCache(oldAvatarUrl);
-      }
-      
-      await _supabase.from('profiles').update({
-        'avatar_url': uniqueAvatarUrl,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', user.id);
-
-      ref.invalidate(profileProvider);
-
-      if (mounted) {
-        UIHelper.showSuccessSnackbar(context, 'Foto profil berhasil diperbarui!');
-        setState(() {});
-      }
+      setState(() {
+        _localImageBytes = compressed;
+        _hasUnsavedImage = true;
+        _hasUnsavedChanges = true;
+      });
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Gagal mengunggah foto: $e');
+        UIHelper.showErrorSnackbar(context, 'Gagal memproses foto: $e');
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _updateProfile() async {
-    if (!_formKey.currentState!.validate()) return;
-
     final newName = _nameController.text.trim();
     final newBio = _bioController.text.trim();
+    
+    if (newName.isEmpty) {
+      UIHelper.showErrorSnackbar(context, 'Nama tidak boleh kosong');
+      return;
+    }
     
     setState(() => _isLoading = true);
     
     try {
-      await _supabase.from('profiles').update({
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      String? newAvatarUrl;
+
+      // Defer upload to the Save process
+      if (_hasUnsavedImage && _localImageBytes != null) {
+        final fileName = '${user.id}_avatar.png'; 
+        
+        await _supabase.storage.from('avatars').uploadBinary(
+          'public/$fileName',
+          _localImageBytes!,
+          fileOptions: const FileOptions(upsert: true, contentType: 'image/png'),
+        );
+        
+        final publicUrl = _supabase.storage.from('avatars').getPublicUrl('public/$fileName');
+        newAvatarUrl = '$publicUrl?v=${DateTime.now().millisecondsSinceEpoch}';
+        
+        final oldAvatarUrl = ref.read(profileProvider).value?.avatarUrl;
+        if (oldAvatarUrl != null && oldAvatarUrl.isNotEmpty) {
+          await CachedNetworkImage.evictFromCache(oldAvatarUrl);
+        }
+      }
+
+      final updates = <String, dynamic>{
         'full_name': newName,
         'bio': newBio,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', _supabase.auth.currentUser!.id);
+      };
+
+      if (newAvatarUrl != null) {
+        updates['avatar_url'] = newAvatarUrl;
+      }
+      
+      // Use partial update if row exists to prevent null overwrites
+      final existing = await _supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
+      if (existing != null) {
+        await _supabase.from('profiles').update(updates).eq('id', user.id);
+      } else {
+        updates['id'] = user.id;
+        await _supabase.from('profiles').insert(updates);
+      }
       
       ref.invalidate(profileProvider);
 
       if (mounted) {
         UIHelper.showSuccessSnackbar(context, 'Profil berhasil disimpan!');
         _hasUnsavedChanges = false;
+        _hasUnsavedImage = false;
         Navigator.pop(context, true); 
       }
     } catch (e) {
@@ -168,6 +181,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   }
   
   Future<void> _handleDeleteAccount() async {
+    if (_isLoading) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -188,27 +203,46 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
     
     if (confirm == true) {
+      setState(() => _isLoading = true);
       try {
-        final userId = _supabase.auth.currentUser?.id;
-        if (userId != null) {
-          // As requested, using the Supabase auth.admin method.
-          // Note: This requires the service_role key to be configured in Supabase.
-          await _supabase.auth.admin.deleteUser(userId); 
-        }
-        ref.read(bottomNavIndexProvider.notifier).setIndex(0);
+        // Step A: Call the Supabase RPC function to delete the user
+        await _supabase.rpc('delete_user');
         
-        // Clear state
+        // Step B: Wrap the local cleanup in a separate try-catch to ignore session_not_found
+        try {
+          await ref.read(authRepositoryProvider).signOut();
+        } on AuthApiException catch (e) {
+          if (e.statusCode == '403' || e.message.contains('session_not_found')) {
+            // Ignore this error: session is already destroyed, which is expected.
+          } else {
+            debugPrint('Logout Error: $e');
+          }
+        } catch (e) {
+          debugPrint('Unknown Logout Error: $e');
+        }
+
+        // Step C: Clear any local SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+
+        // Clear providers state
+        ref.read(bottomNavIndexProvider.notifier).setIndex(0);
         ref.invalidate(habitsProvider);
         ref.invalidate(todayCompletedHabitsProvider);
         ref.invalidate(statisticsProvider);
         ref.invalidate(predictionProvider);
         ref.invalidate(profileProvider);
 
-        await ref.read(authRepositoryProvider).signOut();
+        // Step D: Redirect the user back to the login screen
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+        }
       } catch (e) {
         if (mounted) {
           UIHelper.showErrorSnackbar(context, 'Akun tidak dapat dihapus: $e');
         }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
       }
     }
   }
@@ -225,7 +259,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     final user = _supabase.auth.currentUser;
     final avatarUrl = profile?.avatarUrl ?? user?.userMetadata?['avatar_url'] as String?;
     final email = user?.email ?? '';
-
 
     return PopScope(
       canPop: !_hasUnsavedChanges,
@@ -303,7 +336,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   child: MouseRegion(
                     cursor: SystemMouseCursors.click,
                     child: GestureDetector(
-                      onTap: _isLoading ? null : _pickAndUploadImage,
+                      onTap: _isLoading ? null : _pickImageForPreview,
                       child: Stack(
                         alignment: Alignment.bottomRight,
                         children: [
@@ -316,15 +349,23 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               border: Border.all(color: const Color(0xFF2B3A8C), width: 3),
                             ),
                             child: ClipOval(
-                              child: avatarUrl != null && avatarUrl.isNotEmpty
-                                  ? CachedNetworkImage(
-                                      imageUrl: avatarUrl,
+                              child: _localImageBytes != null
+                                  ? Image.memory(
+                                      _localImageBytes!,
                                       fit: BoxFit.cover,
-                                      placeholder: (context, url) => const CircularProgressIndicator(),
-                                      errorWidget: (context, url, error) =>
-                                          const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C)),
+                                      width: 100,
+                                      height: 100,
                                     )
-                                  : const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C)),
+                                  : (avatarUrl != null && avatarUrl.isNotEmpty
+                                      ? CachedNetworkImage(
+                                          imageUrl: avatarUrl,
+                                          fit: BoxFit.cover,
+                                          memCacheWidth: 200,
+                                          placeholder: (context, url) => const CircularProgressIndicator(),
+                                          errorWidget: (context, url, error) =>
+                                              const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C)),
+                                        )
+                                      : const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C))),
                             ),
                           ),
                           Container(
@@ -364,92 +405,84 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   style: GoogleFonts.inter(color: textColor),
                   decoration: InputDecoration(
                     labelText: 'Nama Lengkap',
-                    prefixIcon: const Icon(Icons.person_outline_rounded),
-                    filled: true,
-                    fillColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(color: isDarkMode ? Colors.white10 : Colors.grey.shade300),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: const BorderSide(color: Color(0xFF2B3A8C), width: 2),
-                    ),
+                    prefixIcon: const Icon(Icons.person_outline),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  validator: (val) => val == null || val.trim().isEmpty ? 'Nama lengkap tidak boleh kosong' : null,
+                  validator: (value) => value == null || value.isEmpty ? 'Nama tidak boleh kosong' : null,
                 ),
                 const SizedBox(height: 16),
                 
                 TextFormField(
                   controller: _bioController,
-                  maxLines: 2,
                   style: GoogleFonts.inter(color: textColor),
+                  maxLines: 3,
                   decoration: InputDecoration(
-                    labelText: 'Bio',
-                    hintText: 'Deskripsikan sedikit tentang diri Anda...',
-                    prefixIcon: const Icon(Icons.info_outline_rounded),
-                    filled: true,
-                    fillColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(color: isDarkMode ? Colors.white10 : Colors.grey.shade300),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: const BorderSide(color: Color(0xFF2B3A8C), width: 2),
-                    ),
+                    labelText: 'Bio Singkat',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                   ),
                 ),
-                
-
                 
                 const SizedBox(height: 48),
                 
                 SizedBox(
                   width: double.infinity,
-                  height: 56,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _updateProfile,
+                    onPressed: (_hasUnsavedChanges && !_isLoading) ? _updateProfile : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2B3A8C),
-                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 2,
                     ),
-                    child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text(
-                            'Simpan Perubahan',
-                            style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold),
+                    child: _isLoading 
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : Text('Simpan Perubahan', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                
+                const SizedBox(height: 32),
+                
+                // Zona Bahaya
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                          const SizedBox(width: 8),
+                          Text('Zona Bahaya', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 16)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Menghapus akun akan memusnahkan semua data habit, statistik, dan riwayat secara permanen.',
+                        style: GoogleFonts.inter(color: isDarkMode ? Colors.red.shade200 : Colors.red.shade700, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _isLoading ? null : _handleDeleteAccount,
+                          icon: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                          label: Text('Hapus Akun Permanen', style: GoogleFonts.inter(color: Colors.red, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                
-                const SizedBox(height: 48),
-                const Divider(),
                 const SizedBox(height: 24),
-                
-                Text('Zona Bahaya', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-                const SizedBox(height: 16),
-                
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton.icon(
-                    onPressed: _handleDeleteAccount,
-                    icon: const Icon(Icons.delete_forever_rounded, color: Colors.white),
-                    label: Text('Hapus Akun Permanen', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 0,
-                    ),
-                  ),
-                ),
-                
-
-                
-                const SizedBox(height: 40),
               ],
             ),
           ),

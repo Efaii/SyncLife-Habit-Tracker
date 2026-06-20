@@ -22,10 +22,20 @@ class UserProfile {
     this.streakAlerts = true,
   });
 
-  factory UserProfile.fromMap(Map<String, dynamic> map) {
+  factory UserProfile.fromMap(Map<String, dynamic> map, {User? authUser}) {
+    String? extractedName = map['full_name'];
+    if (extractedName == null || extractedName.trim().isEmpty) {
+      if (authUser != null) {
+        extractedName = authUser.userMetadata?['full_name']?.toString();
+        if ((extractedName == null || extractedName.trim().isEmpty) && authUser.email != null) {
+          extractedName = authUser.email!.split('@')[0];
+        }
+      }
+    }
+
     return UserProfile(
       id: map['id'],
-      fullName: map['full_name'],
+      fullName: extractedName,
       avatarUrl: map['avatar_url'],
       bio: map['bio'],
       quietHoursStart: map['quiet_hours_start'],
@@ -40,10 +50,10 @@ class ProfileRepository {
   final SupabaseClient _client;
   ProfileRepository(this._client);
 
-  Future<UserProfile?> getProfile(String userId) async {
+  Future<UserProfile?> getProfile(String userId, {User? authUser}) async {
     try {
       final data = await _client.from('profiles').select().eq('id', userId).single();
-      return UserProfile.fromMap(data);
+      return UserProfile.fromMap(data, authUser: authUser);
     } catch (e) {
       throw Exception('Gagal mengambil profil dari database. Pastikan RLS SELECT Policy sudah aktif: $e');
     }
@@ -87,5 +97,5 @@ final profileProvider = FutureProvider.autoDispose<UserProfile?>((ref) async {
   if (user == null) return null;
   
   final repo = ref.read(profileRepositoryProvider);
-  return await repo.getProfile(user.id);
+  return await repo.getProfile(user.id, authUser: user);
 });

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 import 'core/constants/supabase_constants.dart';
 import 'core/constants/providers/theme_provider.dart';
@@ -19,7 +20,12 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: ".env");
+  // Initialize DotEnv with fallback
+  try {
+    await dotenv.load(fileName: "assets/.env");
+  } catch (e) {
+    debugPrint('Warning: assets/.env file not found. Falling back to dart-define or system environment variables.');
+  }
 
   // Initialize Local Notifications
   await NotificationService().init(
@@ -30,6 +36,27 @@ void main() async {
     },
   );
 
+  // 1. CLEAN LOCAL STORAGE (Flutter Web Only)
+  if (kIsWeb) {
+    try {
+      final uri = Uri.base;
+      // Only clean up if we are NOT currently handling a legitimate auth callback
+      final isCallback = uri.queryParameters.containsKey('code') || 
+                         uri.queryParameters.containsKey('error') || 
+                         uri.fragment.contains('access_token');
+                         
+      if (!isCallback) {
+        // Supabase-Flutter uses SharedPreferences under the hood to store tokens and verifiers.
+        // Clearing SharedPreferences is completely safe and won't crash Android/iOS compilations.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+      }
+    } catch (e) {
+      debugPrint('Web Storage Cleanup Error: $e');
+    }
+  }
+
+  // 2. ROBUST INITIALIZATION BLOCK
   try {
     await Supabase.initialize(
       url: SupabaseConstants.supabaseUrl,
@@ -38,14 +65,35 @@ void main() async {
         authFlowType: AuthFlowType.pkce,
       ),
     );
+
+    // MANUAL DEEPLINK HANDLING
+    if (kIsWeb) {
+      final uri = Uri.base;
+      if (uri.queryParameters.containsKey('code') || uri.queryParameters.containsKey('error')) {
+        try {
+          await Supabase.instance.client.auth.getSessionFromUrl(uri);
+        } catch (e) {
+          debugPrint('Manual DeepLink Error: $e');
+        }
+      }
+    }
   } catch (e) {
-    debugPrint('Supabase Initialization Error: $e');
     if (e is AuthException && e.message.contains('Code verifier')) {
-      // Clear corrupted PKCE state
+      debugPrint('Auth SDK noise suppressed: Expected during development.');
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      // Attempt a safe fallback initialization without deep link handling if possible,
-      // but since Supabase.initialize is a singleton, it might already be initialized.
+      try {
+        await Supabase.instance.client.auth.signOut();
+      } catch (_) {}
+    } else if (e.toString().contains('Code verifier')) {
+      debugPrint('Auth SDK noise suppressed: Expected during development.');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      try {
+        await Supabase.instance.client.auth.signOut();
+      } catch (_) {}
+    } else {
+      debugPrint('Supabase Initialization Error: $e');
     }
   }
 

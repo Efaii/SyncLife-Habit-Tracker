@@ -4,6 +4,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import '../../models/habit_model.dart';
 import '../../features/predictor/prediction_provider.dart';
 import '../../features/profile/profile_provider.dart';
+import '../../features/logs/log_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NotificationService {
@@ -118,8 +119,14 @@ class NotificationService {
     await _logNotification(title, body, habit.idHabit);
   }
 
-  Future<void> scheduleStreakAlert(int currentStreak, {UserProfile? profile}) async {
-    if (currentStreak == 0) return;
+  Future<void> scheduleStreakAlert(HabitModel habit, {UserProfile? profile}) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null || habit.idHabit == null) return;
+    
+    final logRepo = LogRepository(Supabase.instance.client);
+    final currentStreak = await logRepo.calculateStreak(habit.idHabit!, user.id);
+
+    if (currentStreak <= 0) return;
 
     // Schedule for 20:00 every day
     var targetDate = DateTime.now().copyWith(hour: 20, minute: 0, second: 0);
@@ -131,10 +138,12 @@ class NotificationService {
       return;
     }
 
+    final message = "Hati-hati, streak $currentStreak hari untuk '${habit.namaHabit}' kamu terancam putus!";
+
     await _notificationsPlugin.zonedSchedule(
-      id: 999, // Unique ID for Streak Alert
-      title: 'Streak Alert! 🔥',
-      body: '$currentStreak hari konsisten tercapai. Selesaikan habitmu hari ini jangan sampai putus!',
+      id: habit.idHabit.hashCode + 10000, // Unique ID for Streak Alert
+      title: 'Awas Streak Putus!',
+      body: message,
       scheduledDate: tz.TZDateTime.from(targetDate, tz.local),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -144,11 +153,12 @@ class NotificationService {
           priority: Priority.high,
         ),
       ),
+      payload: habit.idHabit,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
     
-    await _logNotification('Streak Alert! 🔥', '$currentStreak hari konsisten tercapai. Selesaikan habitmu hari ini jangan sampai putus!', null);
+    await _logNotification('Awas Streak Putus!', message, habit.idHabit);
   }
 
   Future<void> _logNotification(String title, String message, String? habitId) async {
@@ -168,8 +178,12 @@ class NotificationService {
     }
   }
 
-  Future<void> cancelStreakAlert() async {
-    await _notificationsPlugin.cancel(id: 999);
+  Future<void> cancelStreakAlert(List<HabitModel> habits) async {
+    for (var habit in habits) {
+      if (habit.idHabit != null) {
+        await _notificationsPlugin.cancel(id: habit.idHabit.hashCode + 10000);
+      }
+    }
   }
 
   Future<void> cancelSmartReminders(List<HabitModel> habits) async {
@@ -182,5 +196,25 @@ class NotificationService {
 
   Future<void> cancelAllNotifications() async {
     await _notificationsPlugin.cancelAll();
+  }
+
+  Future<void> scheduleDemoNotification(String title, String body) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'demo_channel',
+      'Demo Notifications',
+      channelDescription: 'For presentation purposes',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    const NotificationDetails details = NotificationDetails(android: androidDetails);
+
+    await _notificationsPlugin.zonedSchedule(
+      id: 888, // Unique ID for demo
+      title: title,
+      body: body,
+      scheduledDate: tz.TZDateTime.now(tz.local).add(const Duration(seconds: 5)),
+      notificationDetails: details,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
   }
 }

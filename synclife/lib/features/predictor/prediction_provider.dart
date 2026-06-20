@@ -1,23 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import '../logs/log_repository.dart';
 import '../habits/habit_repository.dart';
+import '../../models/log_model.dart';
+import '../../models/habit_model.dart';
 
 class PredictionResult {
   final double percentage;
   final String insightText;
   final int loggedDaysCount;
 
-  PredictionResult(this.percentage, this.insightText, {this.loggedDaysCount = 7});
+  const PredictionResult(this.percentage, this.insightText, {this.loggedDaysCount = 7});
 }
 
-final predictionProvider = FutureProvider<PredictionResult>((ref) async {
-  final logRepo = ref.watch(logRepositoryProvider);
-  final allLogs = await logRepo.getLogs();
-  final habitRepo = ref.watch(habitRepositoryProvider);
-  final habits = await habitRepo.getHabits();
+class _PredictionData {
+  final List<LogModel> logs;
+  final List<HabitModel> habits;
+
+  const _PredictionData(this.logs, this.habits);
+}
+
+PredictionResult _calculatePredictionIsolate(_PredictionData data) {
+  final allLogs = data.logs;
+  final habits = data.habits;
 
   final activeHabitIds = habits.map((h) => h.idHabit).toSet();
-  final logs = allLogs.where((log) => activeHabitIds.contains(log.idHabit)).toList();
+  final logs = allLogs; // Preserve historical logs of soft-deleted habits
 
   final loggedDays = logs.map((l) {
     if (l.timestamp != null) {
@@ -29,7 +37,7 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
   final int loggedDaysCount = loggedDays.length;
 
   if (loggedDaysCount == 0) {
-    return PredictionResult(
+    return const PredictionResult(
       0.0,
       'Mulai centang habit pertamamu hari ini untuk melatih AI.',
       loggedDaysCount: 0,
@@ -132,7 +140,7 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
   }
 
   final int totalLogs = totalSuccess + totalFail;
-  if (totalLogs == 0) return PredictionResult(0.0, 'Belum ada cukup data untuk prediksi hari ini.');
+  if (totalLogs == 0) return const PredictionResult(0.0, 'Belum ada cukup data untuk prediksi hari ini.');
 
   // Prior Probabilities
   double priorSuccess = totalSuccess / totalLogs;
@@ -180,4 +188,14 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
   }
 
   return PredictionResult(percentage, insightText, loggedDaysCount: loggedDaysCount);
+}
+
+final predictionProvider = FutureProvider<PredictionResult>((ref) async {
+  final logRepo = ref.watch(logRepositoryProvider);
+  final allLogs = await logRepo.getLogs();
+  final habitRepo = ref.watch(habitRepositoryProvider);
+  final habits = await habitRepo.getHabits();
+
+  // Jalankan kalkulasi berat di background isolate
+  return await compute(_calculatePredictionIsolate, _PredictionData(allLogs, habits));
 });

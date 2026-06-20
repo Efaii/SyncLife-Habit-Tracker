@@ -41,6 +41,7 @@ class HabitRepository {
         .from(_tableName)
         .select()
         .eq('user_id', userId)
+        .eq('is_deleted', false)
         .order('created_at', ascending: false);
     
     return response.map((json) => HabitModel.fromJson(json)).toList();
@@ -62,8 +63,8 @@ class HabitRepository {
           (data) {
             print('Fetched Data Count: ${data.length}');
             return data
+                .where((json) => json['is_deleted'] == false || json['is_deleted'] == null)
                 .map((json) => HabitModel.fromJson(json))
-                .where((habit) => !habit.isDeleted)
                 .toList();
           },
         );

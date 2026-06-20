@@ -8,6 +8,7 @@ import 'home/dashboard_screen.dart';
 import 'statistics/statistics_screen.dart';
 import 'predictor/prediction_provider.dart';
 import '../models/log_model.dart';
+import 'notifications/notification_history_screen.dart';
 
 final habitSyncServiceProvider = Provider<HabitSyncService>((ref) {
   return HabitSyncService(ref);
@@ -33,6 +34,7 @@ class HabitSyncService {
     _ref.invalidate(habitsProvider);
     _ref.invalidate(statisticsProvider);
     _ref.invalidate(predictionProvider);
+    _ref.invalidate(notificationLogsProvider);
     _scheduleBackgroundTasks();
   }
 
@@ -47,6 +49,7 @@ class HabitSyncService {
     _ref.invalidate(habitsProvider);
     _ref.invalidate(statisticsProvider);
     _ref.invalidate(predictionProvider);
+    _ref.invalidate(notificationLogsProvider);
     _scheduleBackgroundTasks();
   }
 
@@ -83,15 +86,15 @@ class HabitSyncService {
 
       // 1. Streak Alerts
       if (profile.streakAlerts == true) {
-        if (habits.isNotEmpty && completedIds.length < habits.length) {
-          // Has incomplete habits -> schedule streak alert for 20:00 today
-          await NotificationService().scheduleStreakAlert(stats.currentStreak, profile: profile);
-        } else {
-          // Finished all habits! Cancel streak alert
-          await NotificationService().cancelStreakAlert();
+        await NotificationService().cancelStreakAlert(habits); // Reset all first
+        for (var habit in habits) {
+          if (!completedIds.contains(habit.idHabit)) {
+            // Has incomplete habit -> schedule streak alert for 20:00 today
+            await NotificationService().scheduleStreakAlert(habit, profile: profile);
+          }
         }
       } else {
-        await NotificationService().cancelStreakAlert();
+        await NotificationService().cancelStreakAlert(habits);
       }
 
       // 2. Smart Reminders

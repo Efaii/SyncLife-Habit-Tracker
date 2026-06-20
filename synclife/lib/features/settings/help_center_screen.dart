@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 import '../../utils/ui_helper.dart';
 
@@ -10,15 +11,16 @@ class HelpCenterScreen extends StatelessWidget {
   Future<void> _launchEmail(BuildContext context) async {
     final Uri emailLaunchUri = Uri(
       scheme: 'mailto',
-      path: 'support@synclife.com',
-      query: 'subject=Bantuan Teknis Aplikasi SyncLife',
+      path: 'petermbal0010@gmail.com',
+      query: 'subject=SyncLife Support Request',
     );
 
     if (await canLaunchUrl(emailLaunchUri)) {
       await launchUrl(emailLaunchUri);
     } else {
+      await Clipboard.setData(const ClipboardData(text: 'support@synclife.com'));
       if (context.mounted) {
-        UIHelper.showErrorSnackbar(context, 'Tidak dapat membuka aplikasi email.');
+        UIHelper.showSuccessSnackbar(context, 'Tidak ada aplikasi email terdeteksi. Alamat email disalin ke clipboard!');
       }
     }
   }

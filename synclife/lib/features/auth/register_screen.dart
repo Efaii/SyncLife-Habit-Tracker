@@ -38,12 +38,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             _passwordController.text.trim(),
           );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Akun berhasil dibuat, silakan login'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        UIHelper.showSuccessSnackbar(context, 'Akun berhasil dibuat, silakan login');
         Navigator.pop(context); // Return to login screen
       }
     } on AuthException catch (e) {
@@ -121,8 +116,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _passwordController,
+                  obscuringCharacter: '●',
+                  style: GoogleFonts.inter(letterSpacing: _obscurePassword ? 2.0 : 0.0),
                   decoration: InputDecoration(
                     labelText: 'Password',
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),

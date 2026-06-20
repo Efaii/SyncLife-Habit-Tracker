@@ -181,27 +181,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     }
                     setStateDialog(() => isResetting = true);
                     try {
-                      await Supabase.instance.client.auth.resetPasswordForEmail(
-                        emailController.text.trim(),
+                      final email = emailController.text.trim();
+                      
+                      // 1. Periksa ketersediaan email via RPC
+                      final dynamic isRegistered = await Supabase.instance.client.rpc(
+                        'check_email_exists', 
+                        params: {'email_input': email}
                       );
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Tautan reset password telah dikirim ke email Anda.'), backgroundColor: Colors.green),
-                        );
+                      
+                      if (!context.mounted) return;
+                      
+                      if (isRegistered != true) {
+                        Navigator.of(context).pop(); // Tutup dialog sebelum snackbar
+                        UIHelper.showErrorSnackbar(context, 'Email tidak terdaftar di sistem kami.');
+                        return;
                       }
+
+                      // 2. Kirim tautan pemulihan
+                      await Supabase.instance.client.auth.resetPasswordForEmail(
+                        email,
+                        redirectTo: 'io.supabase.synclife://reset-callback/',
+                      );
+                      
+                      if (!context.mounted) return;
+                      Navigator.of(context).pop(); // Tutup dialog sebelum snackbar
+                      UIHelper.showSuccessSnackbar(context, 'Tautan pemulihan telah dikirim ke email Anda.');
+                      
                     } on AuthException catch (e) {
-                      if (context.mounted) {
-                        UIHelper.showErrorSnackbar(context, e.message);
-                      }
+                      if (!context.mounted) return;
+                      Navigator.of(context).pop(); // Tutup dialog sebelum snackbar
+                      UIHelper.showErrorSnackbar(context, e.message);
                     } catch (e) {
-                      if (context.mounted) {
-                        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
-                      }
-                    } finally {
-                      if (context.mounted) {
-                        setStateDialog(() => isResetting = false);
-                      }
+                      if (!context.mounted) return;
+                      Navigator.of(context).pop(); // Tutup dialog sebelum snackbar
+                      UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -278,9 +291,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
-                  style: TextStyle(color: textColor),
+                  obscuringCharacter: '●',
+                  style: GoogleFonts.inter(
+                    color: textColor,
+                    letterSpacing: _obscurePassword ? 2.0 : 0.0,
+                  ),
                   decoration: InputDecoration(
                     labelText: 'Password',
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),

@@ -63,10 +63,6 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final predictionAsync = ref.watch(predictionProvider);
-    final habitsAsync = ref.watch(habitsProvider);
-    final completedAsync = ref.watch(todayCompletedHabitsProvider);
-    final profileAsync = ref.watch(profileProvider);
     
     // --- TAMBAHKAN LOGIKA THEME DI SINI ---
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -89,13 +85,34 @@ class DashboardScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(context, profileAsync, cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final profileAsync = ref.watch(profileProvider);
+                  return _buildHeader(context, profileAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 24),
-              _buildForecastAndInsightCards(context, predictionAsync, cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final predictionAsync = ref.watch(predictionProvider);
+                  return _buildForecastAndInsightCards(context, predictionAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 32),
-              _buildHabitsSection(context, ref, habitsAsync, completedAsync, cardColor, cardShadow, textColor, subtitleColor, isDarkMode),
+              Consumer(
+                builder: (context, ref, _) {
+                  final habitsAsync = ref.watch(habitsProvider);
+                  final completedAsync = ref.watch(todayCompletedHabitsProvider);
+                  return _buildHabitsSection(context, ref, habitsAsync, completedAsync, cardColor, cardShadow, textColor, subtitleColor, isDarkMode);
+                },
+              ),
               const SizedBox(height: 32),
-              _buildBottomStats(ref, completedAsync, cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final completedAsync = ref.watch(todayCompletedHabitsProvider);
+                  return _buildBottomStats(ref, completedAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 100),
             ],
           ),
@@ -149,7 +166,7 @@ class DashboardScreen extends ConsumerWidget {
                   height: 1.2,
                 ),
               ),
-              error: (_, __) => Text(
+              error: (_, _) => Text(
                 '${getGreeting()},\nPengguna',
                 style: GoogleFonts.outfit(
                   fontSize: 28,
@@ -430,7 +447,7 @@ class DashboardScreen extends ConsumerWidget {
               separatorBuilder: (context, index) => const SizedBox(height: 14),
               itemBuilder: (context, index) {
                 final habit = sortedHabits[index];
-                final isCompleted = completedAsync.when(data: (ids) => ids.contains(habit.idHabit), loading: () => false, error: (_, __) => false);
+                final isCompleted = completedAsync.when(data: (ids) => ids.contains(habit.idHabit), loading: () => false, error: (_, _) => false);
                 final habitColor = Color(int.parse(habit.warnaTag.replaceAll('#', '0xFF')));
 
                 return Container(
@@ -569,11 +586,11 @@ class DashboardScreen extends ConsumerWidget {
 
   Widget _buildBottomStats(WidgetRef ref, AsyncValue<Set<String>> completedAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
     final statsAsync = ref.watch(statisticsProvider);
-    final streak = statsAsync.when(data: (stats) => stats.currentStreak, loading: () => 0, error: (_, __) => 0);
+    final streak = statsAsync.when(data: (stats) => stats.currentStreak, loading: () => 0, error: (_, _) => 0);
     final activeHabitIds = ref.watch(habitsProvider).when(
       data: (habits) => habits.map((h) => h.idHabit).toSet(),
       loading: () => <String>{},
-      error: (_, __) => <String>{},
+      error: (_, _) => <String>{},
     );
 
     final totalHabits = activeHabitIds.length;
@@ -581,7 +598,7 @@ class DashboardScreen extends ConsumerWidget {
     final completedCount = completedAsync.when(
       data: (ids) => ids.where((id) => activeHabitIds.contains(id)).length,
       loading: () => 0,
-      error: (_, __) => 0,
+      error: (_, _) => 0,
     );
 
     final focusScore = totalHabits == 0
@@ -636,7 +653,7 @@ class DashboardScreen extends ConsumerWidget {
                       child: const Icon(Icons.emoji_events_rounded, color: Colors.orange, size: 24),
                     ),
                     const SizedBox(height: 12),
-                    Text('${completedCount} HABITS', textAlign: TextAlign.center, style: GoogleFonts.inter(color: subtitleColor, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0)),
+                    Text('$completedCount HABITS', textAlign: TextAlign.center, style: GoogleFonts.inter(color: subtitleColor, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0)),
                     const SizedBox(height: 4),
                     Text(completedCount == 0 ? 'Belum Ada' : 'Selesai', textAlign: TextAlign.center, style: GoogleFonts.outfit(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
                   ],

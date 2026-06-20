@@ -44,7 +44,7 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
   final habits = await ref.watch(habitsProvider.future);
 
   final activeHabitIds = habits.map((h) => h.idHabit).toSet();
-  final logs = allLogs.where((log) => activeHabitIds.contains(log.idHabit)).toList();
+  final logs = allLogs; // Preserve historical logs of soft-deleted habits
 
   if (logs.isEmpty) {
     return StatisticsData(

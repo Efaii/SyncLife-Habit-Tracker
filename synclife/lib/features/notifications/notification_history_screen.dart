@@ -6,14 +6,20 @@ import '../home/dashboard_screen.dart';
 import '../home/main_screen.dart';
 import '../statistics/statistics_screen.dart';
 import '../predictor/prediction_provider.dart';
+import '../profile/profile_provider.dart';
+import '../logs/log_repository.dart';
 import '../../models/habit_model.dart';
-import '../../utils/ui_helper.dart';
+import '../../models/log_model.dart';
 
 enum NotificationRoute {
   dashboard,
   habits,
   statistics,
 }
+
+final notificationLogsProvider = FutureProvider.autoDispose<List<LogModel>>((ref) async {
+  return await ref.read(logRepositoryProvider).getLogs();
+});
 
 class NotificationItem {
   final String title;
@@ -37,25 +43,46 @@ class NotificationItem {
   });
 }
 
-class NotificationHistoryScreen extends ConsumerWidget {
+class NotificationHistoryScreen extends ConsumerStatefulWidget {
   const NotificationHistoryScreen({super.key});
 
-  List<NotificationItem> _generateNotifications(
-    List<HabitModel> activeHabits, 
-    Set<String> completedIds, 
-    Map<String, int> habitStreaks,
-    PredictionResult? prediction,
-  ) {
-    List<NotificationItem> reminders = [];
-    List<NotificationItem> insights = [];
+  @override
+  ConsumerState<NotificationHistoryScreen> createState() => _NotificationHistoryScreenState();
+}
+
+class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  (List<NotificationItem>, List<NotificationItem>) _generateNotifications(
+      List<HabitModel> habits, 
+      Set<String> completedIds, 
+      Map<String, int> habitStreaks,
+      PredictionResult? prediction,
+      List<LogModel>? logs,
+      UserProfile? profile) {
+    
+    final active = <NotificationItem>[];
+    final history = <NotificationItem>[];
     final now = DateTime.now();
 
-    // 1. Prediction Insight Alert (selalu tambahkan jika ada prediksi)
-    if (prediction != null) {
+    // 1. Prediction Insight Alert (History)
+    if (prediction != null && prediction.loggedDaysCount >= 7 && (profile?.smartReminders ?? true)) {
       if (prediction.percentage < 40.0) {
-        insights.add(NotificationItem(
+        history.add(NotificationItem(
           title: 'Insight Prediksi',
-          message: 'Peluang sukses hari ini cukup rendah. Fokus pada habit prioritasmu!',
+          message: 'Berdasarkan pola harianmu, peluang sukses menyelesaikan target hari ini sekitar ${prediction.percentage.round()}%. Yuk, siapkan waktu khusus dan kurangi distraksi!',
           icon: Icons.lightbulb_outline,
           color: Colors.deepPurple,
           timestamp: now.subtract(const Duration(minutes: 30)),
@@ -63,9 +90,9 @@ class NotificationHistoryScreen extends ConsumerWidget {
           routeTarget: NotificationRoute.dashboard,
         ));
       } else {
-        insights.add(NotificationItem(
+        history.add(NotificationItem(
           title: 'Insight Prediksi',
-          message: 'Peluang suksesmu tinggi hari ini! Pertahankan ritme belajarmu.',
+          message: 'Luar biasa! Peluang suksesmu mencapai ${prediction.percentage.round()}% hari ini. Berdasarkan datamu, ini adalah momentum terbaik untuk bertindak!',
           icon: Icons.auto_awesome_rounded,
           color: Colors.deepPurple,
           timestamp: now.subtract(const Duration(minutes: 30)),
@@ -75,9 +102,9 @@ class NotificationHistoryScreen extends ConsumerWidget {
       }
     }
 
-    // 2. Weekly Stats Recap
+    // 2. Weekly Stats Recap (History)
     if (now.weekday == DateTime.sunday && now.hour >= 17) {
-      insights.add(NotificationItem(
+      history.add(NotificationItem(
         title: 'Rekap Mingguan',
         message: 'Statistik mingguanmu sudah siap! Cek habit terkuatmu minggu ini.',
         icon: Icons.bar_chart_rounded,
@@ -88,19 +115,19 @@ class NotificationHistoryScreen extends ConsumerWidget {
       ));
     }
 
-    // 3. Reminders
-    for (var i = 0; i < activeHabits.length; i++) {
-      var habit = activeHabits[i];
+    // 3. Reminders & Milestones
+    for (var i = 0; i < habits.length; i++) {
+      var habit = habits[i];
       if (habit.idHabit == null) continue;
       final isCompletedToday = completedIds.contains(habit.idHabit);
       final streak = habitStreaks[habit.idHabit!] ?? 0;
       
-      // Kasih timestamp yang berbeda-beda sedikit agar urutan terlihat natural
       final itemTime = now.subtract(Duration(hours: 2, minutes: i * 15));
 
       if (!isCompletedToday) {
-        if (streak > 0) {
-          reminders.add(NotificationItem(
+        // Belum selesai -> Masuk tab Aktif
+        if (streak > 0 && (profile?.streakAlerts ?? true)) {
+          active.add(NotificationItem(
             title: 'Awas Streak Putus!',
             message: 'Hati-hati, streak $streak hari untuk "${habit.namaHabit}" kamu terancam putus!',
             icon: Icons.warning_rounded,
@@ -111,7 +138,7 @@ class NotificationHistoryScreen extends ConsumerWidget {
             routeTarget: NotificationRoute.habits,
           ));
         } else {
-          reminders.add(NotificationItem(
+          active.add(NotificationItem(
             title: 'Pengingat Habit',
             message: 'Jangan lupa selesaikan "${habit.namaHabit}" hari ini!',
             icon: Icons.notifications_active_rounded,
@@ -123,9 +150,10 @@ class NotificationHistoryScreen extends ConsumerWidget {
           ));
         }
       } else {
+        // Sudah selesai -> Masuk tab History (khusus milestone)
         final milestoneDays = [3, 7, 14, 21, 30, 50, 100, 365];
         if (milestoneDays.contains(streak)) {
-          reminders.add(NotificationItem(
+          history.add(NotificationItem(
             title: 'Pencapaian Luar Biasa!',
             message: 'Hebat! Kamu berhasil mencapai streak $streak hari untuk "${habit.namaHabit}"!',
             icon: Icons.emoji_events_rounded,
@@ -139,15 +167,203 @@ class NotificationHistoryScreen extends ConsumerWidget {
       }
     }
 
-    // COMBINE AND SORT THE LISTS
-    List<NotificationItem> allNotifications = [...reminders, ...insights];
-    allNotifications.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    // 4. Fetch User Logs from DB (History)
+    if (logs != null) {
+      for (final log in logs) {
+        final habitName = habits.firstWhere(
+            (h) => h.idHabit == log.idHabit, 
+            orElse: () => HabitModel(
+              namaHabit: log.habitName ?? 'Habit Dihapus', 
+              ikon: '',
+              targetWaktu: '00:00',
+              warnaTag: '#000000',
+            )
+        ).namaHabit;
+        final streakCount = habitStreaks[log.idHabit] ?? 0;
 
-    return allNotifications;
+        history.add(NotificationItem(
+          title: 'Aktivitas Dicatat',
+          message: '$streakCount hari streak untuk $habitName! Pertahankan!',
+          icon: Icons.history_rounded,
+          color: Colors.green,
+          habitId: log.idHabit,
+          timestamp: log.timestamp ?? DateTime.now(),
+          type: 'log_history',
+          routeTarget: NotificationRoute.statistics,
+        ));
+      }
+    }
+
+    history.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    active.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    return (active, history);
+  }
+
+  Widget _buildEmptyState(BuildContext context, bool isActive) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            isActive ? Icons.task_alt_rounded : Icons.history_rounded, 
+            size: 80, 
+            color: Colors.grey.shade400,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            isActive ? 'Semua beres!' : 'Belum ada riwayat',
+            style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey.shade700),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              isActive 
+                  ? 'Kamu telah menyelesaikan semua targetmu hari ini. Pertahankan prestasimu!'
+                  : 'Riwayat pencapaian dan insight AI akan muncul di sini seiring berjalannya waktu.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(color: Colors.grey.shade600, fontSize: 15, height: 1.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationList(List<NotificationItem> items, bool isDarkMode, Color textColor) {
+    if (items.isEmpty) {
+      // Return empty state but wrapped in a widget to allow AnimatedSwitcher to see it as a different child type
+      return _buildEmptyState(context, _tabController.index == 0);
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final notif = items[index];
+
+        BoxDecoration iconDecoration;
+        if (notif.type == 'habit_reminder') {
+          iconDecoration = BoxDecoration(
+            color: notif.color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(12),
+          );
+        } else {
+          iconDecoration = BoxDecoration(
+            color: notif.color.withOpacity(0.1),
+            shape: BoxShape.circle,
+          );
+        }
+
+        final cardWidget = Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          elevation: 0,
+          child: InkWell(
+            onTap: () {
+              Navigator.pop(context);
+              if (notif.routeTarget == NotificationRoute.statistics) {
+                ref.read(bottomNavIndexProvider.notifier).setIndex(2);
+              } else if (notif.routeTarget == NotificationRoute.habits) {
+                ref.read(bottomNavIndexProvider.notifier).setIndex(1);
+              } else {
+                ref.read(bottomNavIndexProvider.notifier).setIndex(0);
+              }
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: iconDecoration,
+                    child: Icon(notif.icon, color: notif.color),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          notif.title,
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.bold, 
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          notif.message,
+                          style: GoogleFonts.inter(color: Colors.grey.shade600, height: 1.3),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${notif.timestamp.hour.toString().padLeft(2, '0')}:${notif.timestamp.minute.toString().padLeft(2, '0')}',
+                          style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (notif.type == 'habit_reminder' && _tabController.index == 0)
+                    Icon(Icons.swipe_left_rounded, color: Colors.grey.shade300)
+                  else
+                    Icon(Icons.chevron_right_rounded, color: Colors.grey.shade300),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Jika ini di tab Aktif dan tipe habit_reminder, bungkus dengan Dismissible
+        if (notif.type == 'habit_reminder' && _tabController.index == 0) {
+          return Dismissible(
+            key: Key('dismiss_${notif.habitId}_${notif.timestamp.millisecondsSinceEpoch}'),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 24.0),
+              decoration: BoxDecoration(
+                color: Colors.green.shade500,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text('Tandai Selesai', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  SizedBox(width: 8),
+                  Icon(Icons.check_circle_rounded, color: Colors.white),
+                ],
+              ),
+            ),
+            onDismissed: (direction) async {
+              if (notif.habitId != null) {
+                final newLog = LogModel(
+                  idHabit: notif.habitId!,
+                  timestamp: DateTime.now(),
+                  status: true,
+                  moodLevel: 3, // neutral mood
+                  busyLevel: 3, // neutral busy
+                );
+                await ref.read(logRepositoryProvider).createLog(newLog);
+                // The UI will automatically rebuild and the item will be gone since completedIds updates!
+              }
+            },
+            child: cardWidget,
+          );
+        }
+
+        return cardWidget;
+      },
+    );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
     final textColor = theme.colorScheme.onSurface;
@@ -156,6 +372,7 @@ class NotificationHistoryScreen extends ConsumerWidget {
     final completedAsync = ref.watch(todayCompletedHabitsProvider);
     final statsAsync = ref.watch(statisticsProvider);
     final predictionAsync = ref.watch(predictionProvider);
+    final logsAsync = ref.watch(notificationLogsProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -163,11 +380,24 @@ class NotificationHistoryScreen extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Riwayat Notifikasi',
+          'Pusat Notifikasi',
           style: GoogleFonts.outfit(color: textColor, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
         iconTheme: IconThemeData(color: textColor),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: theme.colorScheme.primary,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: theme.colorScheme.primary,
+          indicatorWeight: 3,
+          labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold),
+          unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500),
+          tabs: const [
+            Tab(text: 'Aktif'),
+            Tab(text: 'Riwayat'),
+          ],
+        ),
       ),
       body: habitsAsync.when(
         data: (habits) {
@@ -175,115 +405,30 @@ class NotificationHistoryScreen extends ConsumerWidget {
             data: (completedIds) {
               return statsAsync.when(
                 data: (stats) {
-                  final prediction = predictionAsync.whenOrNull(data: (p) => p);
-                  final allNotifications = _generateNotifications(habits, completedIds, stats.habitStreaks, prediction);
-                  
-                  if (allNotifications.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                  return logsAsync.when(
+                    data: (logs) {
+                      final prediction = predictionAsync.whenOrNull(data: (p) => p);
+                      final profile = ref.watch(profileProvider).value;
+                      final (activeItems, historyItems) = _generateNotifications(habits, completedIds, stats.habitStreaks, prediction, logs, profile);
+                      
+                      return TabBarView(
+                        controller: _tabController,
                         children: [
-                          Icon(Icons.notifications_off_rounded, size: 80, color: Colors.grey.shade400),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Semua aman!',
-                            style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+                          // Tab 1: Aktif
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            child: _buildNotificationList(activeItems, isDarkMode, textColor),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Tidak ada pengingat untuk saat ini.',
-                            style: GoogleFonts.inter(color: Colors.grey),
+                          // Tab 2: Riwayat
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            child: _buildNotificationList(historyItems, isDarkMode, textColor),
                           ),
                         ],
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: allNotifications.length,
-                    itemBuilder: (context, index) {
-                      final notif = allNotifications[index];
-
-                      // RENDER UNIFIED LISTVIEW: Dynamic styling based on notification.type
-                      BoxDecoration iconDecoration;
-                      if (notif.type == 'habit_reminder') {
-                        iconDecoration = BoxDecoration(
-                          color: notif.color.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        );
-                      } else if (notif.type == 'prediction_insight' || notif.type == 'statistics_recap') {
-                        iconDecoration = BoxDecoration(
-                          color: notif.color.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        );
-                      } else {
-                        iconDecoration = BoxDecoration(
-                          color: notif.color.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        );
-                      }
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                        elevation: 0,
-                        child: InkWell(
-                          onTap: () {
-                            Navigator.pop(context);
-                            if (notif.routeTarget == NotificationRoute.statistics) {
-                              ref.read(bottomNavIndexProvider.notifier).setIndex(2);
-                            } else if (notif.routeTarget == NotificationRoute.habits) {
-                              ref.read(bottomNavIndexProvider.notifier).setIndex(1);
-                            } else {
-                              ref.read(bottomNavIndexProvider.notifier).setIndex(0);
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: iconDecoration,
-                                  child: Icon(notif.icon, color: notif.color),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        notif.title,
-                                        style: GoogleFonts.inter(
-                                          fontWeight: FontWeight.bold, 
-                                          color: textColor,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        notif.message,
-                                        style: GoogleFonts.inter(color: Colors.grey.shade600),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        '${notif.timestamp.hour.toString().padLeft(2, '0')}:${notif.timestamp.minute.toString().padLeft(2, '0')}',
-                                        style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
-                              ],
-                            ),
-                          ),
-                        ),
                       );
                     },
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (err, stack) => Center(child: Text('Error Logs: $err', style: TextStyle(color: textColor))),
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),

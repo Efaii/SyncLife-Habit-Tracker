@@ -43,7 +43,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
       
       if (currentStreak == false) {
-        await NotificationService().cancelStreakAlert();
+        final habits = await ref.read(habitRepositoryProvider).getHabits();
+        await NotificationService().cancelStreakAlert(habits);
       }
       
       if (currentSmart == false) {
@@ -228,22 +229,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               width: 1,
                             ),
                           ),
-                          child: CircleAvatar(
-                            radius: 32,
-                            backgroundColor: theme.colorScheme.primary,
-                            backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
-                                ? CachedNetworkImageProvider(avatarUrl)
-                                : null,
-                            child: (avatarUrl == null || avatarUrl.isEmpty)
-                                ? Text(
-                                    fullName.isNotEmpty ? fullName[0].toUpperCase() : 'U',
-                                    style: GoogleFonts.outfit(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: theme.colorScheme.onPrimary,
-                                    ),
+                          child: ClipOval(
+                            child: (avatarUrl != null && avatarUrl.isNotEmpty)
+                                ? CachedNetworkImage(
+                                    imageUrl: avatarUrl,
+                                    fit: BoxFit.cover,
+                                    memCacheWidth: 200,
+                                    placeholder: (context, url) => const CircularProgressIndicator(),
+                                    errorWidget: (context, url, error) =>
+                                        const Icon(Icons.person, size: 32),
                                   )
-                                : null,
+                                : Container(
+                                    color: theme.colorScheme.primary,
+                                    child: Center(
+                                      child: Text(
+                                        fullName.isNotEmpty ? fullName[0].toUpperCase() : 'U',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: theme.colorScheme.onPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -347,9 +355,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     title: 'Pengingat Cerdas',
                     subtitle: 'Notifikasi prediktif berdasarkan AI',
                     value: _localSmartReminders ?? profile?.smartReminders ?? true,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setState(() => _localSmartReminders = val);
                       _updateSettingsDB();
+                      
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      if (val) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text(
+                              'Pengingat Cerdas diaktifkan: Naive Bayes akan menganalisis waktu optimal Anda.',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                        NotificationService().scheduleDemoNotification(
+                          '✨ Pengingat Cerdas Aktif', 
+                          'Demo: Waktu optimal Anda untuk habit berikutnya telah dihitung.'
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text(
+                              'Pengingat Cerdas dinonaktifkan.',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                        final habits = await ref.read(habitRepositoryProvider).getHabits();
+                        await NotificationService().cancelSmartReminders(habits);
+                      }
                     },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
@@ -362,9 +405,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     title: 'Peringatan Streak',
                     subtitle: 'Beri tahu jika streak saya dalam bahaya',
                     value: _localStreakAlerts ?? profile?.streakAlerts ?? true,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setState(() => _localStreakAlerts = val);
                       _updateSettingsDB();
+                      
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      if (val) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text(
+                              'Pengingat Streak diaktifkan: Kami akan mengingatkan Anda sebelum streak terputus.',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                        NotificationService().scheduleDemoNotification(
+                          '🔥 Peringatan Streak Aktif', 
+                          'Demo: Awas! Streak Anda terancam putus jika tidak diselesaikan.'
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text(
+                              'Peringatan Streak dimatikan.',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                        final habits = await ref.read(habitRepositoryProvider).getHabits();
+                        await NotificationService().cancelStreakAlert(habits);
+                      }
                     },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
