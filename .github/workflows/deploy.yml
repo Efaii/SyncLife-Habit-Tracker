@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - feature/ux-notification-polish
 
 jobs:
   build-and-deploy:
@@ -46,8 +47,8 @@ jobs:
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v25
         with:
-          vercel-token: ${{ secrets.VERCEL_SYYNCLIFE_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-token: ${{ secrets.VERCEL_SYNCLIFE_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_SYNCLIFE_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_SYNCLIFE_PROJECT_ID }}
           vercel-args: '--prod'
           working-directory: ./synclife/build/web
