@@ -85,10 +85,11 @@ class IconAndColorPicker extends StatelessWidget {
           child: GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 6,
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 52,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
+              childAspectRatio: 1.0,
             ),
             itemCount: _availableIcons.length,
             itemBuilder: (context, index) {
@@ -138,10 +139,11 @@ class IconAndColorPicker extends StatelessWidget {
           child: GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 6,
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 52,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
+              childAspectRatio: 1.0,
             ),
             itemCount: _availableColors.length,
             itemBuilder: (context, index) {

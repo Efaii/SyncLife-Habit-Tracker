@@ -166,13 +166,16 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
         elevation: 0,
         iconTheme: IconThemeData(color: theme.colorScheme.primary),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               Text('Nama Kebiasaan', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16, color: textColor)),
               const SizedBox(height: 8),
               TextFormField(
@@ -271,6 +274,8 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
             ],
           ),
         ),
+      ),
+      ),
       ),
     ),
   );
