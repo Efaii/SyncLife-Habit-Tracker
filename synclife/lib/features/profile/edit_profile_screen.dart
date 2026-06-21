@@ -103,7 +103,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       });
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Gagal memproses foto: $e');
+        UIHelper.showErrorSnackbar(context, 'Gagal memproses foto. Pastikan format sesuai.');
       }
     }
   }
@@ -173,7 +173,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Gagal memperbarui profil: $e');
+        UIHelper.showErrorSnackbar(context, 'Gagal memperbarui profil.');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -239,7 +239,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         }
       } catch (e) {
         if (mounted) {
-          UIHelper.showErrorSnackbar(context, 'Akun tidak dapat dihapus: $e');
+          UIHelper.showErrorSnackbar(context, 'Akun tidak dapat dihapus saat ini.');
         }
       } finally {
         if (mounted) setState(() => _isLoading = false);
@@ -345,8 +345,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             height: 100,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: const Color(0xFF2B3A8C).withValues(alpha: 0.1),
-                              border: Border.all(color: const Color(0xFF2B3A8C), width: 3),
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                              border: Border.all(color: Theme.of(context).colorScheme.primary, width: 3),
                             ),
                             child: ClipOval(
                               child: _localImageBytes != null
@@ -363,18 +363,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                           memCacheWidth: 200,
                                           placeholder: (context, url) => const CircularProgressIndicator(),
                                           errorWidget: (context, url, error) =>
-                                              const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C)),
+                                              Icon(Icons.person_rounded, size: 50, color: Theme.of(context).colorScheme.primary),
                                         )
-                                      : const Icon(Icons.person_rounded, size: 50, color: Color(0xFF2B3A8C))),
+                                      : Icon(Icons.person_rounded, size: 50, color: Theme.of(context).colorScheme.primary)),
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.all(6),
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF2B3A8C),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primary,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
+                            child: Icon(Icons.edit_rounded, color: Theme.of(context).colorScheme.onPrimary, size: 16),
                           ),
                         ],
                       ),
@@ -430,13 +430,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   child: ElevatedButton(
                     onPressed: (_hasUnsavedChanges && !_isLoading) ? _updateProfile : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2B3A8C),
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                     child: _isLoading 
-                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text('Simpan Perubahan', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2))
+                        : Text('Simpan Perubahan', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
                 

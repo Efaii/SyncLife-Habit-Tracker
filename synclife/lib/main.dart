@@ -219,7 +219,7 @@ class _MyAppState extends ConsumerState<MyApp> {
         ),
         bottomNavigationBarTheme: BottomNavigationBarThemeData(
           backgroundColor: const Color(0xFF1E1E1E),
-          selectedItemColor: const Color(0xFF5A72EA),
+          selectedItemColor: const Color(0xFFD0BCFF),
           unselectedItemColor: Colors.grey.shade600,
           elevation: 8,
         ),

@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_provider.dart';
 import '../../utils/ui_helper.dart';
+import '../../widgets/adaptive_logo.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -47,7 +48,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       }
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
+        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan yang tidak terduga.');
       }
     } finally {
       if (mounted) {
@@ -77,6 +78,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const AdaptiveLogo(widthFactor: 0.4),
+                const SizedBox(height: 16),
                 Text(
                   'Buat Akun Baru',
                   textAlign: TextAlign.center,
@@ -154,6 +157,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   onPressed: _isLoading ? null : _register,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -173,7 +177,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: colorScheme.onPrimary,
                           ),
                         ),
                 ),

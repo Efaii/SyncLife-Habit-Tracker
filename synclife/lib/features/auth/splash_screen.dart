@@ -79,8 +79,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             children: [
               const AdaptiveLogo(widthFactor: 0.5),
               const SizedBox(height: 24),
-              const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2B3A8C)),
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
               ),
             ],
           ),

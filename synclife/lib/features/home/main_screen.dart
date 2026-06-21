@@ -33,7 +33,6 @@ class MainScreen extends ConsumerWidget {
     final isDarkMode = theme.brightness == Brightness.dark;
     
     // Warna Utama
-    const Color primaryBlue = Color(0xFF2B3A8C);
     
     // Warna Dinamis
     final backgroundColor = theme.scaffoldBackgroundColor;
@@ -51,7 +50,7 @@ class MainScreen extends ConsumerWidget {
         data: NavigationBarThemeData(
           backgroundColor: backgroundColor,
           elevation: 0,
-          indicatorColor: primaryBlue.withValues(alpha: isDarkMode ? 0.3 : 0.1),
+          indicatorColor: Theme.of(context).colorScheme.primary.withValues(alpha: isDarkMode ? 0.3 : 0.1),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
               return GoogleFonts.inter(

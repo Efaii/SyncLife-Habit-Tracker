@@ -97,7 +97,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
+        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan yang tidak terduga.');
       }
     } finally {
       if (mounted) {
@@ -130,7 +130,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     } catch (e) {
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
+        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan yang tidak terduga.');
       }
     } finally {
       if (mounted) {
@@ -214,16 +214,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     } catch (e) {
                       if (!context.mounted) return;
                       Navigator.of(context).pop(); // Tutup dialog sebelum snackbar
-                      UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan: $e');
+                      UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan yang tidak terduga.');
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2B3A8C),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: isResetting 
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                      : Text('Kirim', style: GoogleFonts.inter(color: Colors.white)),
+                      ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2)) 
+                      : Text('Kirim', style: GoogleFonts.inter()),
                 ),
               ],
             );
@@ -235,7 +236,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const primaryBlue = Color(0xFF2B3A8C);
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface;
 
@@ -330,7 +330,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               _rememberMe = value ?? false;
                             });
                           },
-                          activeColor: primaryBlue,
+                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
                         Text(
                           'Ingat Saya',
@@ -343,7 +343,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: Text(
                         'Lupa Password?',
                         style: GoogleFonts.inter(
-                          color: primaryBlue,
+                          color: Theme.of(context).colorScheme.primary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -354,18 +354,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ElevatedButton(
                   onPressed: (_isLoading || _isLoadingGoogle) ? null : _login,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryBlue,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                   child: _isLoading
-                      ? const SizedBox(
+                      ? SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.onPrimary,
                             strokeWidth: 2,
                           ),
                         )
@@ -374,7 +375,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Colors.white,
                           ),
                         ),
                 ),
@@ -401,7 +401,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ),
                   child: _isLoadingGoogle
-                      ? const SizedBox(
+                      ? SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
@@ -443,7 +443,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: Text(
                     'Belum punya akun? Daftar sekarang',
                     style: GoogleFonts.inter(
-                      color: primaryBlue,
+                      color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),

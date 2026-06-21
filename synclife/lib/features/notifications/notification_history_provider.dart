@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -30,15 +31,39 @@ class NotificationLog {
   }
 }
 
-final notificationHistoryProvider = FutureProvider.autoDispose<List<NotificationLog>>((ref) async {
-  final user = Supabase.instance.client.auth.currentUser;
-  if (user == null) return [];
+class NotificationHistoryNotifier extends AsyncNotifier<List<NotificationLog>> {
+  @override
+  FutureOr<List<NotificationLog>> build() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return [];
 
-  final response = await Supabase.instance.client
-      .from('notifications_log')
-      .select()
-      .eq('user_id', user.id)
-      .order('created_at', ascending: false);
+    final response = await Supabase.instance.client
+        .from('notifications_log')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false);
 
-  return (response as List).map((e) => NotificationLog.fromMap(e)).toList();
-});
+    return (response as List).map((e) => NotificationLog.fromMap(e)).toList();
+  }
+
+  Future<void> removeNotification(String id) async {
+    // Optimistic UI Update: Remove from local state
+    if (state.hasValue) {
+      final currentList = state.value!;
+      state = AsyncData(currentList.where((n) => n.id != id).toList());
+    }
+
+    // Update Database: Delete the notification log
+    try {
+      await Supabase.instance.client
+          .from('notifications_log')
+          .delete()
+          .eq('id', id);
+    } catch (e) {
+      // Refresh from DB if deletion fails
+      ref.invalidateSelf();
+    }
+  }
+}
+
+final notificationHistoryProvider = AsyncNotifierProvider.autoDispose<NotificationHistoryNotifier, List<NotificationLog>>(NotificationHistoryNotifier.new);

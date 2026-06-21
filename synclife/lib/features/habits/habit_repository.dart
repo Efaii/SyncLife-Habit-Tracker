@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/habit_model.dart';
@@ -41,7 +42,6 @@ class HabitRepository {
         .from(_tableName)
         .select()
         .eq('user_id', userId)
-        .eq('is_deleted', false)
         .order('created_at', ascending: false);
     
     return response.map((json) => HabitModel.fromJson(json)).toList();
@@ -50,8 +50,10 @@ class HabitRepository {
   // REALTIME STREAM
   Stream<List<HabitModel>> watchHabits() {
     final userId = _supabase.auth.currentUser?.id;
-    print('--- FETCHING HABITS STREAM ---');
-    print('Current Auth UID: $userId');
+    if (kDebugMode) {
+      debugPrint('--- FETCHING HABITS STREAM ---');
+      debugPrint('Current Auth UID: $userId');
+    }
     if (userId == null) return const Stream.empty();
 
     return _supabase
@@ -61,10 +63,12 @@ class HabitRepository {
         .order('created_at', ascending: false)
         .map(
           (data) {
-            print('Fetched Data Count: ${data.length}');
+            if (kDebugMode) {
+              debugPrint('Fetched Data Count: ${data.length}');
+            }
             return data
-                .where((json) => json['is_deleted'] == false || json['is_deleted'] == null)
                 .map((json) => HabitModel.fromJson(json))
+                .where((habit) => !habit.isDeleted)
                 .toList();
           },
         );

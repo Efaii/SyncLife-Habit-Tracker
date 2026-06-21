@@ -86,15 +86,15 @@ class HabitSyncService {
 
       // 1. Streak Alerts
       if (profile.streakAlerts == true) {
-        await NotificationService().cancelStreakAlert(habits); // Reset all first
-        for (var habit in habits) {
-          if (!completedIds.contains(habit.idHabit)) {
-            // Has incomplete habit -> schedule streak alert for 20:00 today
-            await NotificationService().scheduleStreakAlert(habit, profile: profile);
-          }
+        if (habits.isNotEmpty && completedIds.length < habits.length) {
+          // Has incomplete habits -> schedule streak alert for 20:00 today
+          await NotificationService().scheduleStreakAlert(stats.currentStreak, profile: profile);
+        } else {
+          // Finished all habits! Cancel streak alert
+          await NotificationService().cancelStreakAlert();
         }
       } else {
-        await NotificationService().cancelStreakAlert(habits);
+        await NotificationService().cancelStreakAlert();
       }
 
       // 2. Smart Reminders

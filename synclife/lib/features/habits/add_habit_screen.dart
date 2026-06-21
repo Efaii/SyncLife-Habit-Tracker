@@ -21,8 +21,8 @@ class _AddHabitScreenState extends ConsumerState<AddHabitScreen> {
   final _nameController = TextEditingController();
   
   TimeOfDay? _selectedTime;
-  String _selectedIcon = Icons.fitness_center.codePoint.toString();
-  String _selectedColor = '#673AB7'; // Deep Purple default
+  String? _selectedIcon;
+  String? _selectedColor;
   bool _isLoading = false;
 
   @override
@@ -37,6 +37,10 @@ class _AddHabitScreenState extends ConsumerState<AddHabitScreen> {
       UIHelper.showErrorSnackbar(context, 'Pilih target waktu terlebih dahulu');
       return;
     }
+    if (_selectedIcon == null || _selectedColor == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Harap pilih ikon dan warna terlebih dahulu!'), backgroundColor: Colors.red));
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -48,9 +52,9 @@ class _AddHabitScreenState extends ConsumerState<AddHabitScreen> {
 
       final newHabit = HabitModel(
         namaHabit: _nameController.text.trim(),
-        ikon: _selectedIcon,
+        ikon: _selectedIcon!,
         targetWaktu: timeString,
-        warnaTag: _selectedColor,
+        warnaTag: _selectedColor!,
         createdAt: DateTime.now(),
       );
 
@@ -72,6 +76,7 @@ class _AddHabitScreenState extends ConsumerState<AddHabitScreen> {
   }
 
   Future<void> _selectTime() async {
+    FocusScope.of(context).unfocus();
     final picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
@@ -102,7 +107,9 @@ Widget build(BuildContext context) {
   final inputFillColor = theme.cardColor;
   final borderColor = isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200;
 
-  return Scaffold(
+  return GestureDetector(
+    onTap: () => FocusScope.of(context).unfocus(),
+    child: Scaffold(
     backgroundColor: backgroundColor,
     appBar: AppBar(
       title: Text(
@@ -139,8 +146,8 @@ Widget build(BuildContext context) {
             
             const SizedBox(height: 28),
             IconAndColorPicker(
-              selectedIcon: _selectedIcon,
-              selectedColor: _selectedColor,
+              selectedIcon: _selectedIcon ?? '',
+              selectedColor: _selectedColor ?? '',
               onIconSelected: (val) => setState(() => _selectedIcon = val),
               onColorSelected: (val) => setState(() => _selectedColor = val),
             ),
@@ -183,16 +190,18 @@ Widget build(BuildContext context) {
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2B3A8C),
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: Text(_isLoading ? 'Menyimpan...' : 'Simpan Kebiasaan', style: const TextStyle(color: Colors.white)),
+                child: Text(_isLoading ? 'Menyimpan...' : 'Simpan Kebiasaan', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onPrimary)),
               ),
             ),
           ],
         ),
       ),
     ),
+  ),
   );
 }
 }

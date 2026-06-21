@@ -6,10 +6,11 @@ import '../home/dashboard_screen.dart';
 import '../home/main_screen.dart';
 import '../statistics/statistics_screen.dart';
 import '../predictor/prediction_provider.dart';
-import '../profile/profile_provider.dart';
 import '../logs/log_repository.dart';
 import '../../models/habit_model.dart';
 import '../../models/log_model.dart';
+import '../logs/context_bottom_sheet.dart';
+import 'notification_history_provider.dart';
 
 enum NotificationRoute {
   dashboard,
@@ -22,6 +23,7 @@ final notificationLogsProvider = FutureProvider.autoDispose<List<LogModel>>((ref
 });
 
 class NotificationItem {
+  final String? id;
   final String title;
   final String message;
   final IconData icon;
@@ -32,6 +34,7 @@ class NotificationItem {
   final String type;
 
   NotificationItem({
+    this.id,
     required this.title,
     required this.message,
     required this.icon,
@@ -70,15 +73,14 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
       Set<String> completedIds, 
       Map<String, int> habitStreaks,
       PredictionResult? prediction,
-      List<LogModel>? logs,
-      UserProfile? profile) {
+      List<LogModel>? logs) {
     
     final active = <NotificationItem>[];
     final history = <NotificationItem>[];
     final now = DateTime.now();
 
     // 1. Prediction Insight Alert (History)
-    if (prediction != null && prediction.loggedDaysCount >= 7 && (profile?.smartReminders ?? true)) {
+    if (prediction != null && prediction.loggedDaysCount >= 7) {
       if (prediction.percentage < 40.0) {
         history.add(NotificationItem(
           title: 'Insight Prediksi',
@@ -126,7 +128,7 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
 
       if (!isCompletedToday) {
         // Belum selesai -> Masuk tab Aktif
-        if (streak > 0 && (profile?.streakAlerts ?? true)) {
+        if (streak > 0) {
           active.add(NotificationItem(
             title: 'Awas Streak Putus!',
             message: 'Hati-hati, streak $streak hari untuk "${habit.namaHabit}" kamu terancam putus!',
@@ -170,20 +172,14 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
     // 4. Fetch User Logs from DB (History)
     if (logs != null) {
       for (final log in logs) {
-        final habitName = habits.firstWhere(
-            (h) => h.idHabit == log.idHabit, 
-            orElse: () => HabitModel(
-              namaHabit: log.habitName ?? 'Habit Dihapus', 
-              ikon: '',
-              targetWaktu: '00:00',
-              warnaTag: '#000000',
-            )
-        ).namaHabit;
-        final streakCount = habitStreaks[log.idHabit] ?? 0;
+        String habitName = log.habitName ?? 'Tidak Diketahui';
+        try {
+          habitName = habits.firstWhere((h) => h.idHabit == log.idHabit).namaHabit;
+        } catch (_) {}
 
         history.add(NotificationItem(
           title: 'Aktivitas Dicatat',
-          message: '$streakCount hari streak untuk $habitName! Pertahankan!',
+          message: 'Kamu menyelesaikan habit "$habitName" hari ini.',
           icon: Icons.history_rounded,
           color: Colors.green,
           habitId: log.idHabit,
@@ -231,7 +227,7 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
     );
   }
 
-  Widget _buildNotificationList(List<NotificationItem> items, bool isDarkMode, Color textColor) {
+  Widget _buildNotificationList(List<NotificationItem> items, List<HabitModel> habits, bool isDarkMode, Color textColor) {
     if (items.isEmpty) {
       // Return empty state but wrapped in a widget to allow AnimatedSwitcher to see it as a different child type
       return _buildEmptyState(context, _tabController.index == 0);
@@ -246,12 +242,12 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
         BoxDecoration iconDecoration;
         if (notif.type == 'habit_reminder') {
           iconDecoration = BoxDecoration(
-            color: notif.color.withOpacity(0.15),
+            color: notif.color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
           );
         } else {
           iconDecoration = BoxDecoration(
-            color: notif.color.withOpacity(0.1),
+            color: notif.color.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           );
         }
@@ -340,17 +336,34 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
                 ],
               ),
             ),
-            onDismissed: (direction) async {
+            confirmDismiss: (direction) async {
               if (notif.habitId != null) {
-                final newLog = LogModel(
-                  idHabit: notif.habitId!,
-                  timestamp: DateTime.now(),
-                  status: true,
-                  moodLevel: 3, // neutral mood
-                  busyLevel: 3, // neutral busy
-                );
-                await ref.read(logRepositoryProvider).createLog(newLog);
-                // The UI will automatically rebuild and the item will be gone since completedIds updates!
+                try {
+                  final habit = habits.firstWhere((h) => h.idHabit == notif.habitId);
+                  final result = await showModalBottomSheet<bool>(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => ContextBottomSheet(
+                      habitId: habit.idHabit!,
+                      habitName: habit.namaHabit,
+                    ),
+                  );
+                  return result == true;
+                } catch (_) {
+                  return false;
+                }
+              }
+              return false;
+            },
+            onDismissed: (direction) {
+              // Invalidate state providers so the UI rebuilds with the new completed habit
+              ref.invalidate(todayCompletedHabitsProvider);
+              ref.invalidate(notificationLogsProvider);
+              
+              if (notif.id != null) {
+                // Delete from State and Supabase
+                ref.read(notificationHistoryProvider.notifier).removeNotification(notif.id!);
               }
             },
             child: cardWidget,
@@ -408,8 +421,7 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
                   return logsAsync.when(
                     data: (logs) {
                       final prediction = predictionAsync.whenOrNull(data: (p) => p);
-                      final profile = ref.watch(profileProvider).value;
-                      final (activeItems, historyItems) = _generateNotifications(habits, completedIds, stats.habitStreaks, prediction, logs, profile);
+                      final (activeItems, historyItems) = _generateNotifications(habits, completedIds, stats.habitStreaks, prediction, logs);
                       
                       return TabBarView(
                         controller: _tabController,
@@ -417,30 +429,30 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
                           // Tab 1: Aktif
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 300),
-                            child: _buildNotificationList(activeItems, isDarkMode, textColor),
+                            child: _buildNotificationList(activeItems, habits, isDarkMode, textColor),
                           ),
                           // Tab 2: Riwayat
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 300),
-                            child: _buildNotificationList(historyItems, isDarkMode, textColor),
+                            child: _buildNotificationList(historyItems, habits, isDarkMode, textColor),
                           ),
                         ],
                       );
                     },
                     loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (err, stack) => Center(child: Text('Error Logs: $err', style: TextStyle(color: textColor))),
+                    error: (err, stack) => Center(child: Text('Gagal memuat log.', style: TextStyle(color: textColor))),
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (err, stack) => Center(child: Text('Error: $err', style: TextStyle(color: textColor))),
+                error: (err, stack) => Center(child: Text('Gagal memuat stats.', style: TextStyle(color: textColor))),
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (err, stack) => Center(child: Text('Error: $err', style: TextStyle(color: textColor))),
+            error: (err, stack) => Center(child: Text('Gagal memuat kebiasaan.', style: TextStyle(color: textColor))),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, stack) => Center(child: Text('Error: $err', style: TextStyle(color: textColor))),
+        error: (err, stack) => Center(child: Text('Gagal memuat profil.', style: TextStyle(color: textColor))),
       ),
     );
   }

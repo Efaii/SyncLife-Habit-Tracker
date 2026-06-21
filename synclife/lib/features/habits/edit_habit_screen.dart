@@ -22,8 +22,8 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
   late TextEditingController _nameController;
   
   TimeOfDay? _selectedTime;
-  late String _selectedIcon;
-  late String _selectedColor; 
+  String? _selectedIcon;
+  String? _selectedColor;
   bool _isLoading = false;
 
   @override
@@ -89,6 +89,10 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
       UIHelper.showErrorSnackbar(context, 'Pilih target waktu terlebih dahulu');
       return;
     }
+    if (_selectedIcon == null || _selectedColor == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Harap pilih ikon dan warna terlebih dahulu!'), backgroundColor: Colors.red));
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -100,9 +104,9 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
       final updatedHabit = HabitModel(
         idHabit: widget.habit.idHabit,
         namaHabit: _nameController.text.trim(),
-        ikon: _selectedIcon,
+        ikon: _selectedIcon!,
         targetWaktu: timeString,
-        warnaTag: _selectedColor,
+        warnaTag: _selectedColor!,
         createdAt: widget.habit.createdAt,
       );
 
@@ -118,12 +122,13 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        UIHelper.showErrorSnackbar(context, 'Error: $e');
+        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan pada sistem. Silakan coba lagi.');
       }
     }
   }
 
   Future<void> _selectTime() async {
+    FocusScope.of(context).unfocus();
     final picked = await showTimePicker(
       context: context,
       initialTime: _selectedTime ?? TimeOfDay.now(),
@@ -148,7 +153,9 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface;
 
-    return Scaffold(
+    return GestureDetector(
+    onTap: () => FocusScope.of(context).unfocus(),
+    child: Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
@@ -192,8 +199,8 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
               const SizedBox(height: 28),
               
               IconAndColorPicker(
-                selectedIcon: _selectedIcon,
-                selectedColor: _selectedColor,
+                selectedIcon: _selectedIcon ?? '',
+                selectedColor: _selectedColor ?? '',
                 onIconSelected: (val) => setState(() => _selectedIcon = val),
                 onColorSelected: (val) => setState(() => _selectedColor = val),
               ),
@@ -239,18 +246,18 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
                 child: ElevatedButton(
                   onPressed: (_isLoading || !hasChanges) ? null : _submit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo,
-                    foregroundColor: Colors.white,
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: theme.colorScheme.onPrimary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                     elevation: 0,
                   ),
                   child: _isLoading
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 24,
                           height: 24,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2),
                         )
                       : Text(
                           'Simpan Perubahan',
@@ -265,6 +272,7 @@ class _EditHabitScreenState extends ConsumerState<EditHabitScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

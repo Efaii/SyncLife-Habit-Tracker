@@ -17,11 +17,16 @@ class ContextBottomSheet extends ConsumerStatefulWidget {
 }
 
 class _ContextBottomSheetState extends ConsumerState<ContextBottomSheet> {
-  int _selectedMood = 3;
-  int _selectedBusy = 2;
+  int? _selectedMood;
+  int? _selectedBusy;
   bool _isLoading = false;
 
   void _submit() async {
+    if (_selectedMood == null || _selectedBusy == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tolong beritahu perasaan dan kesibukanmu saat ini!'), backgroundColor: Colors.red));
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -48,8 +53,8 @@ class _ContextBottomSheetState extends ConsumerState<ContextBottomSheet> {
       final newLog = LogModel(
         idHabit: widget.habitId,
         habitName: widget.habitName,
-        moodLevel: _selectedMood,
-        busyLevel: _selectedBusy,
+        moodLevel: _selectedMood!,
+        busyLevel: _selectedBusy!,
         status: true,
         timestamp: now,
       );
@@ -57,11 +62,13 @@ class _ContextBottomSheetState extends ConsumerState<ContextBottomSheet> {
       // Gunakan HabitSyncService untuk memastikan Sinkronisasi Cerdas (SMART SYNC)
       await ref.read(habitSyncServiceProvider).submitHabitLog(newLog);
       
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      UIHelper.showSuccessSnackbar(context, 'Yeay! Habit berhasil diselesaikan.');
+      Navigator.of(context).pop();
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        UIHelper.showErrorSnackbar(context, 'Error: $e');
+        UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan pada sistem. Silakan coba lagi.');
       }
     }
   }

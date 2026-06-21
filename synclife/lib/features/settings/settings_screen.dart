@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/providers/theme_provider.dart';
 
@@ -27,38 +28,115 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool? _localStreakAlerts;
   Timer? _debounceTimer;
 
-  void _updateSettingsDB() {
+  Future<void> _handleSmartReminderToggle(bool val) async {
+    setState(() => _localSmartReminders = val);
+    
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-    
-    final currentSmart = _localSmartReminders;
-    final currentStreak = _localStreakAlerts;
-    
-    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 500), () async {
-      await ref.read(profileRepositoryProvider).upsertProfile(
-        user.id,
-        smartReminders: currentSmart,
-        streakAlerts: currentStreak,
-      );
-      
-      if (currentStreak == false) {
-        final habits = await ref.read(habitRepositoryProvider).getHabits();
-        await NotificationService().cancelStreakAlert(habits);
-      }
-      
-      if (currentSmart == false) {
-        final habits = await ref.read(habitRepositoryProvider).getHabits();
-        await NotificationService().cancelSmartReminders(habits);
-      }
-
+    if (user != null) {
+      await ref.read(profileRepositoryProvider).upsertProfile(user.id, smartReminders: val);
       ref.invalidate(profileProvider);
-    });
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('smartReminders', val);
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (val) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Cerdas diaktifkan: Naive Bayes akan menganalisis waktu optimal Anda.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      NotificationService().scheduleDemoNotification(
+        '✨ Pengingat Cerdas Aktif', 
+        'Demo: Waktu optimal Anda untuk habit berikutnya telah dihitung.'
+      );
+    } else {
+      final habits = await ref.read(habitRepositoryProvider).getHabits();
+      await NotificationService().cancelSmartReminders(habits);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.cancel, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Cerdas dinonaktifkan.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.grey.shade800,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleStreakAlertToggle(bool val) async {
+    setState(() => _localStreakAlerts = val);
+    
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      await ref.read(profileRepositoryProvider).upsertProfile(user.id, streakAlerts: val);
+      ref.invalidate(profileProvider);
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('streakAlerts', val);
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (val) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Streak diaktifkan: Kami akan mengingatkan Anda sebelum streak terputus.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      NotificationService().scheduleDemoNotification(
+        '🔥 Peringatan Streak Aktif', 
+        'Demo: Awas! Streak Anda terancam putus jika tidak diselesaikan.'
+      );
+    } else {
+      await NotificationService().cancelStreakAlert();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.cancel, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Streak dinonaktifkan.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.grey.shade800,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
   void dispose() {
-    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -80,7 +158,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(color: iconBgColor, shape: BoxShape.circle),
-                child: Icon(Icons.palette_rounded, color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C), size: 22),
+                child: Icon(Icons.palette_rounded, color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary, size: 22),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -117,8 +195,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(themeProvider.notifier).setTheme(newSelection.first);
                 },
                 style: SegmentedButton.styleFrom(
-                  selectedBackgroundColor: isDarkMode ? const Color(0xFF5A72EA).withValues(alpha: 0.2) : const Color(0xFF2B3A8C).withValues(alpha: 0.1),
-                  selectedForegroundColor: isDarkMode ? const Color(0xFF90A4AE) : const Color(0xFF2B3A8C),
+                  selectedBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: isDarkMode ? 0.3 : 0.15),
+                  selectedForegroundColor: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
                   textStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
                 ),
               ),
@@ -161,7 +239,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final cardColor = theme.cardColor;
     final textColor = theme.colorScheme.onSurface;
     final subtitleColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
-    final iconBgColor = isDarkMode ? Colors.white12 : const Color(0xFF2B3A8C).withValues(alpha: 0.08);
+    final iconBgColor = isDarkMode ? Colors.white12 : Theme.of(context).colorScheme.primary.withValues(alpha: 0.08);
 
     // Warna khusus untuk tombol Log Out
     final logoutColor = isDarkMode ? Colors.red.shade400 : Colors.red.shade700;
@@ -355,44 +433,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     title: 'Pengingat Cerdas',
                     subtitle: 'Notifikasi prediktif berdasarkan AI',
                     value: _localSmartReminders ?? profile?.smartReminders ?? true,
-                    onChanged: (val) async {
-                      setState(() => _localSmartReminders = val);
-                      _updateSettingsDB();
-                      
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      if (val) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text(
-                              'Pengingat Cerdas diaktifkan: Naive Bayes akan menganalisis waktu optimal Anda.',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                        NotificationService().scheduleDemoNotification(
-                          '✨ Pengingat Cerdas Aktif', 
-                          'Demo: Waktu optimal Anda untuk habit berikutnya telah dihitung.'
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text(
-                              'Pengingat Cerdas dinonaktifkan.',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                        final habits = await ref.read(habitRepositoryProvider).getHabits();
-                        await NotificationService().cancelSmartReminders(habits);
-                      }
+                    onChanged: (val) {
+                      _handleSmartReminderToggle(val);
                     },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
@@ -405,44 +447,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     title: 'Peringatan Streak',
                     subtitle: 'Beri tahu jika streak saya dalam bahaya',
                     value: _localStreakAlerts ?? profile?.streakAlerts ?? true,
-                    onChanged: (val) async {
-                      setState(() => _localStreakAlerts = val);
-                      _updateSettingsDB();
-                      
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      if (val) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text(
-                              'Pengingat Streak diaktifkan: Kami akan mengingatkan Anda sebelum streak terputus.',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                        NotificationService().scheduleDemoNotification(
-                          '🔥 Peringatan Streak Aktif', 
-                          'Demo: Awas! Streak Anda terancam putus jika tidak diselesaikan.'
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text(
-                              'Peringatan Streak dimatikan.',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: isDarkMode ? Colors.indigo.shade400 : Colors.indigo.shade800,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                        final habits = await ref.read(habitRepositoryProvider).getHabits();
-                        await NotificationService().cancelStreakAlert(habits);
-                      }
+                    onChanged: (val) {
+                      _handleStreakAlertToggle(val);
                     },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
@@ -561,7 +567,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             child: Icon(
               icon,
-              color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C),
+              color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
               size: 24,
             ),
           ),
@@ -592,8 +598,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeThumbColor: Colors.white,
-            activeTrackColor: const Color(0xFF2B3A8C),
+            activeThumbColor: Theme.of(context).colorScheme.onPrimary,
+            activeTrackColor: Theme.of(context).colorScheme.primary,
             inactiveThumbColor: isDarkMode ? Colors.grey.shade400 : Colors.white,
             inactiveTrackColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
           ),
@@ -626,7 +632,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               child: Icon(
                 icon,
-                color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C),
+                color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
                 size: 24,
               ),
             ),

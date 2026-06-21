@@ -4,7 +4,6 @@ import 'package:timezone/data/latest.dart' as tz;
 import '../../models/habit_model.dart';
 import '../../features/predictor/prediction_provider.dart';
 import '../../features/profile/profile_provider.dart';
-import '../../features/logs/log_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NotificationService {
@@ -89,11 +88,7 @@ class NotificationService {
       body = 'Waktunya untuk habitmu! ';
     }
 
-    if (prediction.percentage > 70) {
-      body += 'Peluang suksesmu tinggi hari ini (AI: ${prediction.percentage.round()}%)! Ayo selesaikan.';
-    } else {
-      body += 'Kamu bisa melakukannya! AI merekomendasikan ekstra fokus hari ini.';
-    }
+    body += prediction.insightText.replaceAllMapped(RegExp(r'\*\*(.*?)\*\*'), (match) => '<b>${match.group(1)}</b>');
 
     // Hashcode is used to ensure a unique ID per habit
     final int notificationId = habit.idHabit?.hashCode ?? DateTime.now().millisecondsSinceEpoch;
@@ -103,12 +98,17 @@ class NotificationService {
       title: title,
       body: body,
       scheduledDate: tz.TZDateTime.from(targetDate, tz.local),
-      notificationDetails: const NotificationDetails(
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           'habit_reminders',
           'Habit Reminders',
           importance: Importance.max,
           priority: Priority.high,
+          styleInformation: BigTextStyleInformation(
+            body,
+            htmlFormatBigText: true,
+            htmlFormatContent: true,
+          ),
         ),
       ),
       payload: habit.idHabit, // Deep Linking payload
@@ -119,14 +119,8 @@ class NotificationService {
     await _logNotification(title, body, habit.idHabit);
   }
 
-  Future<void> scheduleStreakAlert(HabitModel habit, {UserProfile? profile}) async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null || habit.idHabit == null) return;
-    
-    final logRepo = LogRepository(Supabase.instance.client);
-    final currentStreak = await logRepo.calculateStreak(habit.idHabit!, user.id);
-
-    if (currentStreak <= 0) return;
+  Future<void> scheduleStreakAlert(int currentStreak, {UserProfile? profile}) async {
+    if (currentStreak == 0) return;
 
     // Schedule for 20:00 every day
     var targetDate = DateTime.now().copyWith(hour: 20, minute: 0, second: 0);
@@ -138,12 +132,10 @@ class NotificationService {
       return;
     }
 
-    final message = "Hati-hati, streak $currentStreak hari untuk '${habit.namaHabit}' kamu terancam putus!";
-
     await _notificationsPlugin.zonedSchedule(
-      id: habit.idHabit.hashCode + 10000, // Unique ID for Streak Alert
-      title: 'Awas Streak Putus!',
-      body: message,
+      id: 999, // Unique ID for Streak Alert
+      title: 'Streak Alert! 🔥',
+      body: '$currentStreak hari konsisten tercapai. Selesaikan habitmu hari ini jangan sampai putus!',
       scheduledDate: tz.TZDateTime.from(targetDate, tz.local),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -153,12 +145,11 @@ class NotificationService {
           priority: Priority.high,
         ),
       ),
-      payload: habit.idHabit,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
     
-    await _logNotification('Awas Streak Putus!', message, habit.idHabit);
+    await _logNotification('Streak Alert! 🔥', '$currentStreak hari konsisten tercapai. Selesaikan habitmu hari ini jangan sampai putus!', null);
   }
 
   Future<void> _logNotification(String title, String message, String? habitId) async {
@@ -178,12 +169,8 @@ class NotificationService {
     }
   }
 
-  Future<void> cancelStreakAlert(List<HabitModel> habits) async {
-    for (var habit in habits) {
-      if (habit.idHabit != null) {
-        await _notificationsPlugin.cancel(id: habit.idHabit.hashCode + 10000);
-      }
-    }
+  Future<void> cancelStreakAlert() async {
+    await _notificationsPlugin.cancel(id: 999);
   }
 
   Future<void> cancelSmartReminders(List<HabitModel> habits) async {

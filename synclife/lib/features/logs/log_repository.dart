@@ -19,9 +19,23 @@ class LogRepository {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) throw Exception('User not logged in');
 
+    String? finalHabitName = log.habitName;
+    
+    // Fallback: Fetch habit_name from database if null
+    if (finalHabitName == null && log.idHabit != null) {
+      try {
+        final habitData = await _supabase
+            .from('habits')
+            .select('nama_habit')
+            .eq('id_habit', log.idHabit!)
+            .maybeSingle();
+        finalHabitName = habitData?['nama_habit'];
+      } catch (_) {}
+    }
+
     final insertPayload = {
       if (log.idHabit != null) 'id_habit': log.idHabit,
-      if (log.habitName != null) 'habit_name': log.habitName,
+      'habit_name': finalHabitName ?? 'Unknown Habit',
       'user_id': userId,
       'mood_level': log.moodLevel,
       'busy_level': log.busyLevel,
@@ -98,68 +112,8 @@ class LogRepository {
         .eq('id_log', idLog)
         .eq('user_id', userId)
         .single();
-        
-    return LogModel.fromJson(response);
-  }
-
-  // DYNAMIC STREAK CALCULATION
-  Future<int> calculateStreak(String habitId, String userId) async {
-    final response = await _supabase
-        .from(_tableName)
-        .select('timestamp, status')
-        .eq('id_habit', habitId)
-        .eq('user_id', userId)
-        .order('timestamp', ascending: false);
-
-    if (response.isEmpty) return 0;
-
-    final distinctDays = <DateTime>[];
-    for (final row in response) {
-      final status = row['status'];
-      if (status == 1 || status == true) {
-        if (row['timestamp'] != null) {
-          final t = DateTime.parse(row['timestamp'].toString()).toLocal();
-          final day = DateTime(t.year, t.month, t.day);
-          if (!distinctDays.contains(day)) {
-            distinctDays.add(day);
-          }
-        }
-      } else {
-        // If the user explicitly logged a failure, we might break the streak here 
-        // depending on logic, but we'll stick to consecutive positive days.
-      }
-    }
-
-    if (distinctDays.isEmpty) return 0;
-
-    final today = DateTime.now();
-    final todayDate = DateTime(today.year, today.month, today.day);
     
-    final newestLogDate = distinctDays.first;
-    final diffToToday = todayDate.difference(newestLogDate).inDays;
-
-    if (diffToToday > 1) {
-      return 0; // Streak is already broken
-    }
-
-    int streakCount = 1;
-
-    for (int i = 0; i < distinctDays.length - 1; i++) {
-      final currentLogDate = distinctDays[i];
-      final nextLogDate = distinctDays[i + 1];
-      
-      final differenceInDays = currentLogDate.difference(nextLogDate).inDays;
-
-      if (differenceInDays == 1) {
-        streakCount++;
-      } else if (differenceInDays == 0) {
-        continue;
-      } else {
-        break; // A gap of > 1 day occurred, stop counting
-      }
-    }
-
-    return streakCount;
+    return LogModel.fromJson(response);
   }
 
   // UPDATE
