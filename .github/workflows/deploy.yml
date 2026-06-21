@@ -50,7 +50,7 @@ jobs:
       - name: Build Web
         run: |
           cd synclife
-          flutter build web --release
+          flutter build web --release --no-tree-shake-icons
 
       # 6. Deploy to Vercel
       - name: Deploy to Vercel
