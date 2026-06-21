@@ -37,7 +37,16 @@ jobs:
           cd synclife
           flutter pub get
 
-      # 5. Build Flutter Web
+      # 5. Create .env file
+      - name: Create .env file
+        run: |
+          mkdir -p synclife/assets
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://titvkeuzbugfadsrzpxo.supabase.co' }}" > synclife/assets/.env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpdHZrZXV6YnVnZmFkc3J6cHhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDIzNTksImV4cCI6MjA5MjkxODM1OX0.nm1bSaFW8nZmFYoNOS7KLXlwI8M6md6Bh5kA8qCkFIo' }}" >> synclife/assets/.env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpdHZrZXV6YnVnZmFkc3J6cHhvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzM0MjM1OSwiZXhwIjoyMDkyOTE4MzU5fQ.SE0ihP8GHGgz-XbY9foTIcmSWRBQiAGEOo6UWGayb10' }}" >> synclife/assets/.env
+          echo "USER_ID=${{ secrets.USER_ID || 'a083cbc4-b7a8-4fd9-9553-d6366368a5e2' }}" >> synclife/assets/.env
+
+      # 6. Build Flutter Web
       - name: Build Web
         run: |
           cd synclife
