@@ -41,7 +41,7 @@ class AuthRepository {
     if (kIsWeb) {
       await _supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: kDebugMode ? Uri.base.origin : null,
+        redirectTo: Uri.base.origin,
       );
       return;
     }
