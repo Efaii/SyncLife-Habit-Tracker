@@ -52,12 +52,15 @@ jobs:
           cd synclife
           flutter build web --release --no-tree-shake-icons
 
-      # 6. Deploy to Vercel
+      # 7. Install Vercel CLI
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      # 8. Deploy to Vercel
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_SYNCLIFE_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_SYNCLIFE_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_SYNCLIFE_PROJECT_ID }}
-          vercel-args: '--prod'
-          working-directory: ./synclife/build/web
+        working-directory: ./synclife/build/web
+        run: |
+          vercel --prod --token ${{ secrets.VERCEL_SYNCLIFE_TOKEN }} --yes
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_SYNCLIFE_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_SYNCLIFE_PROJECT_ID }}
