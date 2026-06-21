@@ -1,0 +1,53 @@
+name: Deploy Flutter Web to Vercel
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. Setup Java (needed for some Flutter web tasks or dependencies)
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 3. Setup Flutter SDK
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          # Anda juga dapat menentukan versi Flutter yang spesifik jika diperlukan, contoh:
+          # flutter-version: '3.19.0'
+
+      # 4. Install Dependencies
+      - name: Install Dependencies
+        run: |
+          cd synclife
+          flutter pub get
+
+      # 5. Build Flutter Web
+      - name: Build Web
+        run: |
+          cd synclife
+          flutter build web --release
+
+      # 6. Deploy to Vercel
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_SYYNCLIFE_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./synclife/build/web
