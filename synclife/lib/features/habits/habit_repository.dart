@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/habit_model.dart';
@@ -17,9 +18,15 @@ class HabitRepository {
 
   // CREATE
   Future<HabitModel> createHabit(HabitModel habit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
+    final habitData = habit.toJson();
+    habitData['user_id'] = userId;
+
     final response = await _supabase
         .from(_tableName)
-        .insert(habit.toJson())
+        .insert(habitData)
         .select()
         .single();
         
@@ -28,9 +35,13 @@ class HabitRepository {
 
   // READ ALL
   Future<List<HabitModel>> getHabits() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return [];
+
     final response = await _supabase
         .from(_tableName)
         .select()
+        .eq('user_id', userId)
         .order('created_at', ascending: false);
     
     return response.map((json) => HabitModel.fromJson(json)).toList();
@@ -38,23 +49,41 @@ class HabitRepository {
 
   // REALTIME STREAM
   Stream<List<HabitModel>> watchHabits() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (kDebugMode) {
+      debugPrint('--- FETCHING HABITS STREAM ---');
+      debugPrint('Current Auth UID: $userId');
+    }
+    if (userId == null) return const Stream.empty();
+
     return _supabase
         .from(_tableName)
         .stream(primaryKey: ['id_habit'])
+        .eq('user_id', userId)
         .order('created_at', ascending: false)
         .map(
-          (data) => data
-              .map((json) => HabitModel.fromJson(json))
-              .toList(),
+          (data) {
+            if (kDebugMode) {
+              debugPrint('Fetched Data Count: ${data.length}');
+            }
+            return data
+                .map((json) => HabitModel.fromJson(json))
+                .where((habit) => !habit.isDeleted)
+                .toList();
+          },
         );
   }
 
   // READ SINGLE
   Future<HabitModel> getHabitById(String idHabit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     final response = await _supabase
         .from(_tableName)
         .select()
         .eq('id_habit', idHabit)
+        .eq('user_id', userId)
         .single();
     
     return HabitModel.fromJson(response);
@@ -66,10 +95,14 @@ class HabitRepository {
       throw Exception('Cannot update habit without id_habit');
     }
     
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     final response = await _supabase
         .from(_tableName)
         .update(habit.toJson())
         .eq('id_habit', habit.idHabit!)
+        .eq('user_id', userId)
         .select()
         .single();
         
@@ -78,9 +111,13 @@ class HabitRepository {
 
   // DELETE
   Future<void> deleteHabit(String idHabit) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not logged in');
+
     await _supabase
         .from(_tableName)
-        .delete()
-        .eq('id_habit', idHabit);
+        .update({'is_deleted': true})
+        .eq('id_habit', idHabit)
+        .eq('user_id', userId);
   }
 }

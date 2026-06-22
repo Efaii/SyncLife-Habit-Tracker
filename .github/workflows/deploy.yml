@@ -1,0 +1,66 @@
+name: Deploy Flutter Web to Vercel
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feature/ux-notification-polish
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. Setup Java (needed for some Flutter web tasks or dependencies)
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 3. Setup Flutter SDK
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          # Anda juga dapat menentukan versi Flutter yang spesifik jika diperlukan, contoh:
+          # flutter-version: '3.19.0'
+
+      # 4. Install Dependencies
+      - name: Install Dependencies
+        run: |
+          cd synclife
+          flutter pub get
+
+      # 5. Create .env file
+      - name: Create .env file
+        run: |
+          mkdir -p synclife/assets
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://titvkeuzbugfadsrzpxo.supabase.co' }}" > synclife/assets/.env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpdHZrZXV6YnVnZmFkc3J6cHhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDIzNTksImV4cCI6MjA5MjkxODM1OX0.nm1bSaFW8nZmFYoNOS7KLXlwI8M6md6Bh5kA8qCkFIo' }}" >> synclife/assets/.env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpdHZrZXV6YnVnZmFkc3J6cHhvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzM0MjM1OSwiZXhwIjoyMDkyOTE4MzU5fQ.SE0ihP8GHGgz-XbY9foTIcmSWRBQiAGEOo6UWGayb10' }}" >> synclife/assets/.env
+          echo "USER_ID=${{ secrets.USER_ID || 'a083cbc4-b7a8-4fd9-9553-d6366368a5e2' }}" >> synclife/assets/.env
+
+      # 6. Build Flutter Web
+      - name: Build Web
+        run: |
+          cd synclife
+          flutter build web --release --no-tree-shake-icons
+
+      # 7. Install Vercel CLI
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      # 8. Deploy to Vercel
+      - name: Deploy to Vercel
+        working-directory: ./synclife/build/web
+        run: |
+          vercel --prod --token ${{ secrets.VERCEL_SYNCLIFE_TOKEN }} --yes
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_SYNCLIFE_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_SYNCLIFE_PROJECT_ID }}

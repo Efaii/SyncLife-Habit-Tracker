@@ -8,11 +8,14 @@ import '../habits/add_habit_screen.dart';
 import '../habits/edit_habit_screen.dart';
 import '../logs/log_repository.dart';
 import '../statistics/statistics_screen.dart';
-import '../../core/constants/providers/theme_provider.dart'; // IMPORT THEME PROVIDER
+import '../notifications/notification_history_screen.dart';
+import '../../utils/ui_helper.dart';
+import '../habit_sync_service.dart';
+import '../profile/profile_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Constants
 const Color bgColor = Color(0xFFEEF2FF);
-const Color primaryBlue = Color(0xFF2B3A8C);
 const Color softGreen = Color(0xFFA5D6A7);
 
 // Provider for fetching today's completed habits
@@ -28,7 +31,7 @@ final todayCompletedHabitsProvider = FutureProvider<Set<String>>((ref) async {
     if (log.status && log.timestamp != null) {
       final logDate = DateTime(log.timestamp!.year, log.timestamp!.month, log.timestamp!.day);
       if (logDate.isAtSameMomentAs(todayStart)) {
-        completedIds.add(log.idHabit);
+        if (log.idHabit != null) completedIds.add(log.idHabit!);
       }
     }
   }
@@ -46,9 +49,9 @@ class DashboardScreen extends ConsumerWidget {
   
   String getGreeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) return 'Selamat pagi';
-    if (hour < 15) return 'Selamat siang';
-    if (hour < 18) return 'Selamat sore';
+    if (hour >= 5 && hour < 11) return 'Selamat pagi';
+    if (hour >= 11 && hour < 15) return 'Selamat siang';
+    if (hour >= 15 && hour < 19) return 'Selamat sore';
     return 'Selamat malam';
   }
 
@@ -59,12 +62,9 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final predictionAsync = ref.watch(predictionProvider);
-    final habitsAsync = ref.watch(habitsProvider);
-    final completedAsync = ref.watch(todayCompletedHabitsProvider);
     
     // --- TAMBAHKAN LOGIKA THEME DI SINI ---
-    final isDarkMode = ref.watch(themeProvider) == ThemeMode.dark;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final backgroundColor = isDarkMode ? const Color(0xFF121212) : bgColor;
     final cardColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -79,21 +79,56 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: backgroundColor, // Gunakan backgroundColor dinamis
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
+        child: RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
+          onRefresh: () async {
+            // Force fetch fresh data and recalculate everything
+            ref.invalidate(profileProvider);
+            ref.invalidate(predictionProvider);
+            ref.invalidate(habitsProvider);
+            ref.invalidate(todayCompletedHabitsProvider);
+            
+            // Optional: wait a moment for the UX so the spinner is visible
+            await Future.delayed(const Duration(milliseconds: 500));
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final profileAsync = ref.watch(profileProvider);
+                  return _buildHeader(context, profileAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 24),
-              _buildForecastAndInsightCards(predictionAsync, cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final predictionAsync = ref.watch(predictionProvider);
+                  return _buildForecastAndInsightCards(context, predictionAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 32),
-              _buildHabitsSection(context, ref, habitsAsync, completedAsync, cardColor, cardShadow, textColor, subtitleColor, isDarkMode),
+              Consumer(
+                builder: (context, ref, _) {
+                  final habitsAsync = ref.watch(habitsProvider);
+                  final completedAsync = ref.watch(todayCompletedHabitsProvider);
+                  return _buildHabitsSection(context, ref, habitsAsync, completedAsync, cardColor, cardShadow, textColor, subtitleColor, isDarkMode);
+                },
+              ),
               const SizedBox(height: 32),
-              _buildBottomStats(ref, completedAsync, cardColor, cardShadow, textColor, subtitleColor),
+              Consumer(
+                builder: (context, ref, _) {
+                  final completedAsync = ref.watch(todayCompletedHabitsProvider);
+                  return _buildBottomStats(context, ref, completedAsync, cardColor, cardShadow, textColor, subtitleColor);
+                },
+              ),
               const SizedBox(height: 100),
             ],
           ),
+        ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -103,28 +138,56 @@ class DashboardScreen extends ConsumerWidget {
             MaterialPageRoute(builder: (context) => const AddHabitScreen()),
           );
         },
-        backgroundColor: primaryBlue,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         elevation: 4,
-        child: const Icon(Icons.add, color: Colors.white),
+        child: Icon(Icons.add, color: Theme.of(context).colorScheme.onPrimary),
       ),
     );
   }
 
-  Widget _buildHeader(Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
+  Widget _buildHeader(BuildContext context, AsyncValue profileAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
+    final user = Supabase.instance.client.auth.currentUser;
+    final email = user?.email ?? '';
+    
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '${getGreeting()},\nFathir',
-              style: GoogleFonts.outfit(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                color: textColor,
-                height: 1.2,
+            profileAsync.when(
+              data: (profile) {
+                String userName = profile?.fullName ?? 'Pengguna';
+                
+                return Text(
+                  '${getGreeting()},\n$userName',
+                  style: GoogleFonts.outfit(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                    height: 1.2,
+                  ),
+                );
+              },
+              loading: () => Text(
+                '${getGreeting()},\n...',
+                style: GoogleFonts.outfit(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                  height: 1.2,
+                ),
+              ),
+              error: (_, _) => Text(
+                '${getGreeting()},\nPengguna',
+                style: GoogleFonts.outfit(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                  height: 1.2,
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -137,22 +200,75 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ],
         ),
-        Container(
-          padding: const EdgeInsets.all(10),
+      ),
+      const SizedBox(width: 16),
+      Container(
           decoration: BoxDecoration(
             color: cardColor,
             shape: BoxShape.circle,
             boxShadow: [cardShadow],
           ),
-          child: Icon(Icons.notifications_outlined, color: textColor, size: 24),
+          child: Material(
+            color: Colors.transparent,
+            child: IconButton(
+              icon: Icon(Icons.notifications_outlined, color: textColor, size: 24),
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationHistoryScreen()));
+              },
+            ),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildForecastAndInsightCards(AsyncValue<PredictionResult> predictionAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
+  Widget _buildFormattedText(String text, TextStyle baseStyle) {
+    final parts = text.split('**');
+    return RichText(
+      text: TextSpan(
+        style: baseStyle,
+        children: parts.asMap().entries.map((entry) {
+          final index = entry.key;
+          final part = entry.value;
+          final isBold = index % 2 != 0; 
+          return TextSpan(
+            text: part,
+            style: isBold ? baseStyle.copyWith(fontWeight: FontWeight.bold) : baseStyle,
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildForecastAndInsightCards(BuildContext context, AsyncValue<PredictionResult> predictionAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
     return predictionAsync.when(
       data: (result) {
+        if (result.insightText == 'Belum ada cukup data untuk prediksi hari ini.') {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.analytics_outlined, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 28),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildFormattedText(
+                    result.insightText,
+                    GoogleFonts.inter(
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
         return Column(
           children: [
             // Success Forecast Card (Tetap biru gradient)
@@ -160,15 +276,11 @@ class DashboardScreen extends ConsumerWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [primaryBlue, const Color(0xFF1A237E)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: Theme.of(context).colorScheme.primary,
                 borderRadius: BorderRadius.circular(28),
                 boxShadow: [
                   BoxShadow(
-                    color: primaryBlue.withValues(alpha: 0.4),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4),
                     blurRadius: 24,
                     offset: const Offset(0, 12),
                   ),
@@ -185,31 +297,31 @@ class DashboardScreen extends ConsumerWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
+                                color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 'SUCCESS FORECAST',
-                                style: GoogleFonts.inter(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.0),
+                                style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onPrimary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.0),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        Text('Peluang Sukses\nHari Ini', style: GoogleFonts.outfit(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700, height: 1.2)),
+                        Text('Peluang Sukses\nHari Ini', style: GoogleFonts.outfit(color: Theme.of(context).colorScheme.onPrimary, fontSize: 24, fontWeight: FontWeight.w700, height: 1.2)),
                         const SizedBox(height: 16),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: result.percentage >= 70 ? Colors.green.withValues(alpha: 0.3) : result.percentage >= 40 ? Colors.orange.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                            color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(result.percentage >= 70 ? Icons.trending_up_rounded : result.percentage >= 40 ? Icons.trending_flat_rounded : Icons.trending_down_rounded, color: Colors.white, size: 14),
+                              Icon(result.percentage >= 70 ? Icons.trending_up_rounded : result.percentage >= 40 ? Icons.trending_flat_rounded : Icons.trending_down_rounded, color: Theme.of(context).colorScheme.onPrimary, size: 14),
                               const SizedBox(width: 6),
-                              Text(result.percentage >= 70 ? 'Tinggi' : result.percentage >= 40 ? 'Sedang' : 'Rendah', style: GoogleFonts.inter(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                              Text(result.percentage >= 70 ? 'Tinggi' : result.percentage >= 40 ? 'Sedang' : 'Rendah', style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
                             ],
                           ),
                         ),
@@ -219,23 +331,38 @@ class DashboardScreen extends ConsumerWidget {
                   const SizedBox(width: 16),
                   SizedBox(
                     height: 100, width: 100,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        CircularProgressIndicator(
-                          value: result.percentage / 100, strokeWidth: 10, backgroundColor: Colors.white.withValues(alpha: 0.2),
-                          valueColor: AlwaysStoppedAnimation<Color>(result.percentage >= 70 ? Colors.greenAccent : result.percentage >= 40 ? Colors.orangeAccent : Colors.redAccent),
-                        ),
-                        Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text('${result.percentage.toStringAsFixed(0)}%', style: GoogleFonts.outfit(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                              Text('Sukses', style: GoogleFonts.inter(color: Colors.white.withValues(alpha: 0.7), fontSize: 10)),
-                            ],
-                          ),
-                        ),
-                      ],
+                    child: Builder(
+                      builder: (context) {
+                        // 1. Sinkronisasi Logika: Hitung integer bulat satu kali saja.
+                        final int roundedPercent = result.percentage.round();
+                        
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CircularProgressIndicator(
+                              // Konversi integer ke desimal dan clamp.
+                              value: (roundedPercent / 100).clamp(0.0, 1.0), 
+                              strokeWidth: 10, 
+                              backgroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.1),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Theme.of(context).colorScheme.onPrimary
+                              ),
+                              // 2. Fix Visual: Gunakan butt agar ujungnya rata dan tidak menutup celah 1%
+                              strokeCap: StrokeCap.butt, 
+                            ),
+                            Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  // Gunakan variabel integer yang sama untuk teks!
+                                  Text('$roundedPercent%', style: GoogleFonts.outfit(color: Theme.of(context).colorScheme.onPrimary, fontSize: 22, fontWeight: FontWeight.bold)),
+                                  Text('Sukses', style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7), fontSize: 10)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }
                     ),
                   ),
                 ],
@@ -250,23 +377,51 @@ class DashboardScreen extends ConsumerWidget {
                 color: cardColor,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [cardShadow],
-                border: const Border(left: BorderSide(color: primaryBlue, width: 4)),
+                border: Border(left: BorderSide(color: Colors.amber.shade600, width: 4)),
               ),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: primaryBlue.withValues(alpha: 0.1), shape: BoxShape.circle),
-                    child: const Icon(Icons.lightbulb_outline, color: primaryBlue, size: 20),
-                  ),
+                  result.loggedDaysCount > 0 && result.loggedDaysCount < 7
+                      ? Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: CircularProgressIndicator(
+                                value: result.loggedDaysCount / 7,
+                                strokeWidth: 3,
+                                backgroundColor: Colors.amber.withValues(alpha: 0.2),
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.amber.shade700),
+                              ),
+                            ),
+                            Icon(Icons.auto_awesome, color: Colors.amber.shade700, size: 20),
+                          ],
+                        )
+                      : Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.15), shape: BoxShape.circle),
+                          child: Icon(Icons.lightbulb_outline, color: Colors.amber.shade700, size: 20),
+                        ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Insight Prediksi', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14, color: textColor)),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Fokus Hari Ini', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14, color: textColor)),
+                            if (result.loggedDaysCount >= 7)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+                                child: Text('${result.percentage.toStringAsFixed(0)}%', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green.shade700)),
+                              ),
+                          ],
+                        ),
                         const SizedBox(height: 4),
-                        Text(result.insightText, style: GoogleFonts.inter(color: subtitleColor, fontSize: 13, height: 1.4)),
+                        _buildFormattedText(result.insightText, GoogleFonts.inter(color: subtitleColor, fontSize: 13, height: 1.4)),
                       ],
                     ),
                   ),
@@ -277,11 +432,13 @@ class DashboardScreen extends ConsumerWidget {
         );
       },
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Text('Error: $error', style: TextStyle(color: textColor)),
+      error: (error, _) => Text('Gagal memuat data.', style: TextStyle(color: textColor)),
     );
   }
 
   Widget _buildHabitsSection(BuildContext context, WidgetRef ref, AsyncValue habitsAsync, AsyncValue<Set<String>> completedAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor, bool isDarkMode) {
+    final theme = Theme.of(context);
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -289,8 +446,7 @@ class DashboardScreen extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text("Fokus Hari Ini", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: textColor)),
-            Text("Lihat Semua", style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: primaryBlue)),
+            Text("Habit Harian", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: textColor)),
           ],
         ),
         const SizedBox(height: 16),
@@ -306,8 +462,8 @@ class DashboardScreen extends ConsumerWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(color: primaryBlue.withValues(alpha: 0.08), shape: BoxShape.circle),
-                      child: const Icon(Icons.edit_calendar_rounded, size: 48, color: primaryBlue),
+                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08), shape: BoxShape.circle),
+                      child: Icon(Icons.edit_calendar_rounded, size: 48, color: Theme.of(context).colorScheme.primary),
                     ),
                     const SizedBox(height: 16),
                     Text('Belum Ada Habit', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
@@ -318,8 +474,8 @@ class DashboardScreen extends ConsumerWidget {
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AddHabitScreen())),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        decoration: BoxDecoration(color: primaryBlue, borderRadius: BorderRadius.circular(20)),
-                        child: Text('➕ Tambah Habit', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+                        decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(20)),
+                        child: Text('Tambah Habit', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onPrimary)),
                       ),
                     ),
                   ],
@@ -332,47 +488,58 @@ class DashboardScreen extends ConsumerWidget {
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: sortedHabits.length,
+              itemCount: sortedHabits.length > 3 ? 3 : sortedHabits.length,
               separatorBuilder: (context, index) => const SizedBox(height: 14),
               itemBuilder: (context, index) {
                 final habit = sortedHabits[index];
-                final isCompleted = completedAsync.when(data: (ids) => ids.contains(habit.idHabit), loading: () => false, error: (_, __) => false);
+                final isCompleted = completedAsync.when(data: (ids) => ids.contains(habit.idHabit), loading: () => false, error: (_, _) => false);
+                final habitColor = Color(int.parse(habit.warnaTag.replaceAll('#', '0xFF')));
 
-                return Opacity(
-                  opacity: isCompleted ? 0.6 : 1.0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: cardColor,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: isCompleted ? primaryBlue.withValues(alpha: 0.3) : isDarkMode ? Colors.white10 : Colors.grey.shade100, width: 1.5),
-                      boxShadow: [cardShadow],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          height: 52, width: 52,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: isCompleted ? [primaryBlue.withValues(alpha: 0.8), primaryBlue] : [primaryBlue.withValues(alpha: 0.08), primaryBlue.withValues(alpha: 0.15)],
-                              begin: Alignment.topLeft, end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Center(child: Text(habit.ikon.isNotEmpty ? habit.ikon : '⭐', style: const TextStyle(fontSize: 24))),
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: isCompleted ? (isDarkMode ? Theme.of(context).colorScheme.onPrimary : Colors.grey.shade100) : cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: isCompleted ? Colors.transparent : (isDarkMode ? Colors.white10 : Colors.grey.shade200), width: 1.5),
+                    boxShadow: isCompleted ? [] : [cardShadow],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        height: 52, width: 52,
+                        decoration: BoxDecoration(
+                          color: isCompleted ? habitColor.withValues(alpha: 0.2) : habitColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        const SizedBox(width: 14),
+                        child: Center(child: UIHelper.renderHabitIcon(habit.ikon, size: 24, color: habitColor)),
+                      ),
+                      const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(habit.namaHabit, style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15, color: isCompleted ? subtitleColor : textColor, decoration: isCompleted ? TextDecoration.lineThrough : null)),
+                              Text(
+                                habit.namaHabit, 
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                  fontWeight: FontWeight.w700, 
+                                  fontSize: 15, 
+                                  color: isCompleted ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.onSurface, 
+                                  decoration: isCompleted ? TextDecoration.lineThrough : null
+                                )
+                              ),
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(Icons.access_time_rounded, size: 12, color: subtitleColor),
+                                  Icon(Icons.access_time_rounded, size: 12, color: theme.colorScheme.onSurfaceVariant),
                                   const SizedBox(width: 4),
-                                  Text('Habit Harian • ${habit.targetWaktu.length >= 5 ? habit.targetWaktu.substring(0, 5) : habit.targetWaktu}', style: GoogleFonts.inter(fontSize: 12, color: subtitleColor, fontWeight: FontWeight.w500)),
+                                  Text(
+                                    'Habit Harian • ${habit.targetWaktu.length >= 5 ? habit.targetWaktu.substring(0, 5) : habit.targetWaktu}', 
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontSize: 12, 
+                                      color: theme.colorScheme.onSurfaceVariant, 
+                                      fontWeight: FontWeight.w500
+                                    )
+                                  ),
                                 ],
                               ),
                             ],
@@ -381,28 +548,52 @@ class DashboardScreen extends ConsumerWidget {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            GestureDetector(
-                              onTap: isCompleted ? null : () {
-                                if (habit.idHabit != null) {
-                                  showModalBottomSheet(
-                                    context: context,
-                                    isScrollControlled: true,
-                                    backgroundColor: cardColor, // <-- Mengikuti warna tema
-                                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-                                    builder: (context) => ContextBottomSheet(habitId: habit.idHabit!),
-                                  );
-                                }
-                              },
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(19),
+                                onTap: () async {
+                                 if (habit.idHabit == null) return;
+                                 if (isCompleted) {
+                                   final confirm = await UIHelper.showUncheckConfirmation(context);
+                                   if (confirm == true) {
+                                     try {
+                                       await ref.read(habitSyncServiceProvider).removeTodayLog(habit.idHabit!);
+                                       if (context.mounted) {
+                                         UIHelper.showSuccessSnackbar(context, 'Log habit dibatalkan');
+                                       }
+                                     } catch (e) {
+                                       if (context.mounted) {
+                                         UIHelper.showErrorSnackbar(context, 'Terjadi kesalahan pada sistem. Silakan coba lagi.');
+                                       }
+                                     }
+                                   }
+                                 } else {
+                                   showModalBottomSheet(
+                                     context: context,
+                                     isScrollControlled: true,
+                                     backgroundColor: cardColor,
+                                     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                                     builder: (context) => Material(
+                                       color: Colors.transparent,
+                                       child: ContextBottomSheet(
+                                         habitId: habit.idHabit!, 
+                                         habitName: habit.namaHabit
+                                       ),
+                                     ),
+                                   );
+                                 }
+                               },
                               child: Container(
                                 width: 38, height: 38,
                                 decoration: BoxDecoration(
-                                  color: isCompleted ? primaryBlue : cardColor,
+                                  color: isCompleted ? habitColor : Colors.transparent,
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: isCompleted ? primaryBlue : isDarkMode ? Colors.white24 : Colors.grey.shade300, width: 2),
-                                  boxShadow: isCompleted ? [] : [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 6, offset: const Offset(0, 2))],
+                                  border: Border.all(color: isCompleted ? habitColor : Colors.grey.shade400, width: 2),
                                 ),
-                                child: Center(child: isCompleted ? const Icon(Icons.check_rounded, color: Colors.white, size: 20) : const Icon(Icons.sentiment_satisfied_alt_rounded, color: Colors.grey, size: 22)),
+                                child: Center(child: isCompleted ? const Icon(Icons.check_rounded, color: Colors.white, size: 20) : null),
                               ),
+                             ),
                             ),
                             const SizedBox(width: 4),
                             PopupMenuButton<String>(
@@ -414,22 +605,19 @@ class DashboardScreen extends ConsumerWidget {
                                   Navigator.push(context, MaterialPageRoute(builder: (context) => EditHabitScreen(habit: habit)));
                                 } else if (value == 'hapus') {
                                   if (habit.idHabit != null) {
-
-                                    await ref.read(logRepositoryProvider)
-                                        .deleteLogsByHabitId(habit.idHabit!);
-
-                                    await ref.read(habitRepositoryProvider)
-                                        .deleteHabit(habit.idHabit!);
-
-                                    ref.invalidate(habitsProvider);
-                                    ref.invalidate(todayCompletedHabitsProvider);
-                                    ref.invalidate(statisticsProvider);
-                                    ref.invalidate(predictionProvider);
+                                    try {
+                                      await ref.read(habitSyncServiceProvider).deleteHabit(habit.idHabit!);
+                                      if (!context.mounted) return;
+                                      UIHelper.showSuccessSnackbar(context, 'Habit berhasil dihapus.');
+                                    } catch (e) {
+                                      if (!context.mounted) return;
+                                      UIHelper.showErrorSnackbar(context, 'Gagal menghapus habit.');
+                                    }
                                   }
                                 }
                               },
-                              itemBuilder: (BuildContext context) => [
-                                PopupMenuItem(value: 'edit', child: Row(children: [const Icon(Icons.edit_outlined, color: primaryBlue, size: 20), const SizedBox(width: 8), Text('Edit', style: GoogleFonts.inter(color: primaryBlue))])),
+                              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                                PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.primary, size: 20), const SizedBox(width: 8), Text('Edit', style: GoogleFonts.inter(color: Theme.of(context).colorScheme.primary))])),
                                 PopupMenuItem(value: 'hapus', child: Row(children: [const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20), const SizedBox(width: 8), Text('Hapus', style: GoogleFonts.inter(color: Colors.redAccent))])),
                               ],
                             ),
@@ -437,27 +625,32 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                  ),
-                );
-              },
+                  );
+                },
             );
           },
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Text('Error: $error', style: TextStyle(color: textColor)),
+          error: (error, _) => Text('Gagal memuat prediksi.', style: TextStyle(color: textColor)),
         ),
       ],
     );
   }
 
-  Widget _buildBottomStats(WidgetRef ref, AsyncValue<Set<String>> completedAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
+  Widget _buildBottomStats(BuildContext context, WidgetRef ref, AsyncValue<Set<String>> completedAsync, Color cardColor, BoxShadow cardShadow, Color textColor, Color subtitleColor) {
     final statsAsync = ref.watch(statisticsProvider);
-    final streak = statsAsync.when(data: (stats) => stats.currentStreak, loading: () => 0, error: (_, __) => 0);
-    final completedCount = completedAsync.when(data: (ids) => ids.length, loading: () => 0, error: (_, __) => 0);
+    final streak = statsAsync.when(data: (stats) => stats.currentStreak, loading: () => 0, error: (_, _) => 0);
+    final activeHabitIds = ref.watch(habitsProvider).when(
+      data: (habits) => habits.map((h) => h.idHabit).toSet(),
+      loading: () => <String>{},
+      error: (_, _) => <String>{},
+    );
 
-    final totalHabits = ref.watch(habitsProvider).when(
-      data: (habits) => habits.length,
+    final totalHabits = activeHabitIds.length;
+
+    final completedCount = completedAsync.when(
+      data: (ids) => ids.where((id) => activeHabitIds.contains(id)).length,
       loading: () => 0,
-      error: (_, __) => 0,
+      error: (_, _) => 0,
     );
 
     final focusScore = totalHabits == 0
@@ -471,25 +664,25 @@ class DashboardScreen extends ConsumerWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [primaryBlue, const Color(0xFF1A237E)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            color: Theme.of(context).colorScheme.primary,
             borderRadius: BorderRadius.circular(24),
-            boxShadow: [BoxShadow(color: primaryBlue.withValues(alpha: 0.4), blurRadius: 20, offset: const Offset(0, 10))],
+            boxShadow: [BoxShadow(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4), blurRadius: 20, offset: const Offset(0, 10))],
           ),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
-                child: const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 32),
+                decoration: BoxDecoration(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.15), shape: BoxShape.circle),
+                child: Icon(Icons.local_fire_department_rounded, color: Theme.of(context).colorScheme.onPrimary, size: 32),
               ),
               const SizedBox(width: 20),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('ACTIVE STREAK', style: GoogleFonts.inter(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+                    Text('ACTIVE STREAK', style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5)),
                     const SizedBox(height: 4),
-                    Text(streak == 0 ? 'Mulai streak hari ini! 💪' : '$streak Hari Berturut-turut! 🔥', style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text(streak == 0 ? 'Mulai streak hari ini!' : '$streak Hari Berturut-turut!', style: GoogleFonts.outfit(color: Theme.of(context).colorScheme.onPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -501,20 +694,20 @@ class DashboardScreen extends ConsumerWidget {
           children: [
             Expanded(
               child: Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(24), boxShadow: [cardShadow]),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.15), shape: BoxShape.circle),
-                      child: const Icon(Icons.emoji_events_rounded, color: Colors.orange, size: 24),
+                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15), shape: BoxShape.circle),
+                      child: Icon(Icons.emoji_events_rounded, color: Theme.of(context).colorScheme.primary, size: 24),
                     ),
-                    const SizedBox(height: 16),
-                    Text('${completedCount} HABITS', style: GoogleFonts.inter(color: subtitleColor, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0)),
+                    const SizedBox(height: 12),
+                    Text('$completedCount HABITS', textAlign: TextAlign.center, style: GoogleFonts.inter(color: subtitleColor, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0)),
                     const SizedBox(height: 4),
-                    Text(completedCount == 0 ? 'Belum Ada' : 'Selesai', style: GoogleFonts.outfit(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(completedCount == 0 ? 'Belum Ada' : 'Selesai', textAlign: TextAlign.center, style: GoogleFonts.outfit(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -522,30 +715,29 @@ class DashboardScreen extends ConsumerWidget {
             const SizedBox(width: 16),
             Expanded(
               child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(color: streak == 0 ? (cardColor == Colors.white ? Colors.grey.shade200 : Colors.grey.shade800) : const Color.fromARGB(255, 115, 221, 119), borderRadius: BorderRadius.circular(24), boxShadow: [cardShadow]),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(24), boxShadow: [cardShadow]),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.3), shape: BoxShape.circle),
-                      child: Icon(Icons.bolt_rounded, color: streak == 0 ? Colors.grey : Colors.white, size: 24),
+                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15), shape: BoxShape.circle),
+                      child: Icon(Icons.bolt_rounded, color: Theme.of(context).colorScheme.primary, size: 24),
                     ),
-                    const SizedBox(height: 16),
-                      Text(
-                        '$focusScore% FOKUS',
-                        style: GoogleFonts.inter(
-                          color: focusScore == 0
-                              ? Colors.grey
-                              : Colors.white.withValues(alpha: 0.8),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.0,
-                        ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '$focusScore% FOKUS',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        color: subtitleColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.0,
                       ),
+                    ),
                     const SizedBox(height: 4),
-                    Text('Skor', style: GoogleFonts.outfit(color: streak == 0 ? Colors.grey : Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('Skor', textAlign: TextAlign.center, style: GoogleFonts.outfit(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),

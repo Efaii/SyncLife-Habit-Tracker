@@ -1,8 +1,20 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/providers/theme_provider.dart';
+
+import '../profile/edit_profile_screen.dart';
+import '../profile/profile_provider.dart';
+import '../../widgets/logout_button.dart';
+import 'help_center_screen.dart';
+import 'about_app_screen.dart';
+import '../../core/services/notification_service.dart';
+import '../habits/habit_repository.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -12,19 +24,222 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  // Dummy state untuk toggle notifikasi
-  bool _notificationsEnabled = true;
+  bool? _localSmartReminders;
+  bool? _localStreakAlerts;
+  Timer? _debounceTimer;
+
+  Future<void> _handleSmartReminderToggle(bool val) async {
+    setState(() => _localSmartReminders = val);
+    
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      await ref.read(profileRepositoryProvider).upsertProfile(user.id, smartReminders: val);
+      ref.invalidate(profileProvider);
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('smartReminders', val);
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (val) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Cerdas diaktifkan: Naive Bayes akan menganalisis waktu optimal Anda.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      NotificationService().scheduleDemoNotification(
+        '✨ Pengingat Cerdas Aktif', 
+        'Demo: Waktu optimal Anda untuk habit berikutnya telah dihitung.'
+      );
+    } else {
+      final habits = await ref.read(habitRepositoryProvider).getHabits();
+      await NotificationService().cancelSmartReminders(habits);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.cancel, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Cerdas dinonaktifkan.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.grey.shade800,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleStreakAlertToggle(bool val) async {
+    setState(() => _localStreakAlerts = val);
+    
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      await ref.read(profileRepositoryProvider).upsertProfile(user.id, streakAlerts: val);
+      ref.invalidate(profileProvider);
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('streakAlerts', val);
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (val) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Streak diaktifkan: Kami akan mengingatkan Anda sebelum streak terputus.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      NotificationService().scheduleDemoNotification(
+        '🔥 Peringatan Streak Aktif', 
+        'Demo: Awas! Streak Anda terancam putus jika tidak diselesaikan.'
+      );
+    } else {
+      await NotificationService().cancelStreakAlert();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.cancel, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Pengingat Streak dinonaktifkan.', style: TextStyle(color: Colors.white))),
+            ],
+          ),
+          backgroundColor: Colors.grey.shade800,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  // Widget Helper: Theme Selector Tile
+  Widget _buildThemeSelectorTile({
+    required ThemeMode currentThemeMode,
+    required Color textColor,
+    required Color subtitleColor,
+    required Color iconBgColor,
+    required bool isDarkMode,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: iconBgColor, shape: BoxShape.circle),
+                child: Icon(Icons.palette_rounded, color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary, size: 22),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tampilan Tema', 
+                      style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Pilih mode tema aplikasi', 
+                      style: GoogleFonts.inter(fontSize: 13, color: subtitleColor)
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(value: ThemeMode.system, label: Text('Sistem'), icon: Icon(Icons.brightness_auto_rounded)),
+                  ButtonSegment(value: ThemeMode.light, label: Text('Terang'), icon: Icon(Icons.light_mode_rounded)),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('Gelap'), icon: Icon(Icons.dark_mode_rounded)),
+                ],
+                selected: {currentThemeMode},
+                onSelectionChanged: (Set<ThemeMode> newSelection) {
+                  ref.read(themeProvider.notifier).setTheme(newSelection.first);
+                },
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: isDarkMode ? 0.3 : 0.15),
+                  selectedForegroundColor: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
+                  textStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFallbackInitial(String fullName) {
+    return Text(
+      fullName.isNotEmpty ? fullName[0].toUpperCase() : 'U',
+      style: GoogleFonts.outfit(
+        fontSize: 24,
+        fontWeight: FontWeight.bold,
+        color: Colors.white,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = ref.watch(themeProvider) == ThemeMode.dark;
+    final currentThemeMode = ref.watch(themeProvider);
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    
+    final profileAsync = ref.watch(profileProvider);
+    final profile = profileAsync.value;
+    final user = Supabase.instance.client.auth.currentUser;
+
+    final String? avatarUrl = profile?.avatarUrl;
+    final String fullName = profile?.fullName ?? 'Pengguna';
+    final String bio = (profile?.bio != null && profile!.bio!.isNotEmpty) 
+        ? profile.bio! 
+        : 'Belum ada bio';
     
     // Palet Warna Dinamis
-    final backgroundColor = isDarkMode ? const Color(0xFF121212) : const Color(0xFFEEF2FF);
-    final cardColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = isDarkMode ? Colors.white : const Color(0xFF1E293B);
+    final backgroundColor = theme.scaffoldBackgroundColor;
+    final cardColor = theme.cardColor;
+    final textColor = theme.colorScheme.onSurface;
     final subtitleColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
-    final iconBgColor = isDarkMode ? Colors.white12 : const Color(0xFF2B3A8C).withValues(alpha: 0.08);
+    final iconBgColor = isDarkMode ? Colors.white12 : Theme.of(context).colorScheme.primary.withValues(alpha: 0.08);
 
     // Warna khusus untuk tombol Log Out
     final logoutColor = isDarkMode ? Colors.red.shade400 : Colors.red.shade700;
@@ -53,7 +268,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           children: [
             // 1. KARTU PROFIL
             Container(
-              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: cardColor,
                 borderRadius: BorderRadius.circular(24),
@@ -65,73 +279,117 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ],
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF2B3A8C), Color(0xFF5A72EA)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF2B3A8C).withValues(alpha: 0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      'F', // Bisa diganti inisial user
-                      style: GoogleFonts.outfit(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditProfileScreen()),
+                    );
+                    if (result == true) {
+                      setState(() {});
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 20.0),
+                    child: Row(
                       children: [
-                        Text(
-                          'Fathir',
-                          style: GoogleFonts.outfit(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: textColor,
+                        // Avatar with subtle border
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isDarkMode ? Colors.white12 : Colors.grey.shade200,
+                              width: 1,
+                            ),
+                          ),
+                          child: ClipOval(
+                            child: (avatarUrl != null && avatarUrl.isNotEmpty)
+                                ? CachedNetworkImage(
+                                    imageUrl: avatarUrl,
+                                    fit: BoxFit.cover,
+                                    memCacheWidth: 200,
+                                    placeholder: (context, url) => const CircularProgressIndicator(),
+                                    errorWidget: (context, url, error) =>
+                                        const Icon(Icons.person, size: 32),
+                                  )
+                                : Container(
+                                    color: theme.colorScheme.primary,
+                                    child: Center(
+                                      child: Text(
+                                        fullName.isNotEmpty ? fullName[0].toUpperCase() : 'U',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: theme.colorScheme.onPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Tetap konsisten setiap hari!',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
+                        const SizedBox(width: 16),
+                        
+                        // Text details
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                fullName,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                bio,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: subtitleColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        
+                        const SizedBox(width: 8),
+                        
+                        // Sleek Edit Button
+                        IconButton(
+                          onPressed: () async {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => const EditProfileScreen()),
+                            );
+                            if (result == true) {
+                              setState(() {});
+                            }
+                          },
+                          icon: Icon(
+                            Icons.edit_outlined,
                             color: subtitleColor,
+                            size: 22,
+                          ),
+                          tooltip: 'Edit Profil',
+                          style: IconButton.styleFrom(
+                            backgroundColor: iconBgColor,
+                            shape: const CircleBorder(),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: iconBgColor,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.edit_rounded,
-                      size: 20,
-                      color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
             
@@ -162,12 +420,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               child: Column(
                 children: [
+                  _buildThemeSelectorTile(
+                    currentThemeMode: currentThemeMode,
+                    textColor: textColor,
+                    subtitleColor: subtitleColor,
+                    iconBgColor: iconBgColor,
+                    isDarkMode: isDarkMode,
+                  ),
+                  _buildDivider(isDarkMode),
                   _buildSwitchTile(
-                    icon: Icons.dark_mode_rounded,
-                    title: 'Tema Gelap',
-                    subtitle: 'Sesuaikan dengan kondisi cahaya',
-                    value: isDarkMode,
-                    onChanged: (val) => ref.read(themeProvider.notifier).setTheme(val),
+                    icon: Icons.auto_awesome,
+                    title: 'Pengingat Cerdas',
+                    subtitle: 'Notifikasi prediktif berdasarkan AI',
+                    value: _localSmartReminders ?? profile?.smartReminders ?? true,
+                    onChanged: (val) {
+                      _handleSmartReminderToggle(val);
+                    },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
                     subtitleColor: subtitleColor,
@@ -175,11 +443,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   _buildDivider(isDarkMode),
                   _buildSwitchTile(
-                    icon: Icons.notifications_active_rounded,
-                    title: 'Notifikasi Pengingat',
-                    subtitle: 'Jangan lewatkan habit harianmu',
-                    value: _notificationsEnabled,
-                    onChanged: (val) => setState(() => _notificationsEnabled = val),
+                    icon: Icons.local_fire_department_rounded,
+                    title: 'Peringatan Streak',
+                    subtitle: 'Beri tahu jika streak saya dalam bahaya',
+                    value: _localStreakAlerts ?? profile?.streakAlerts ?? true,
+                    onChanged: (val) {
+                      _handleStreakAlertToggle(val);
+                    },
                     iconBgColor: iconBgColor,
                     textColor: textColor,
                     subtitleColor: subtitleColor,
@@ -191,7 +461,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             
             const SizedBox(height: 32),
             Text(
-              'Lainnya',
+              'Bantuan & Informasi',
               style: GoogleFonts.outfit(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -222,6 +492,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     iconBgColor: iconBgColor,
                     textColor: textColor,
                     isDarkMode: isDarkMode,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const HelpCenterScreen()),
+                      );
+                    },
                   ),
                   _buildDivider(isDarkMode),
                   _buildActionTile(
@@ -230,6 +506,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     iconBgColor: iconBgColor,
                     textColor: textColor,
                     isDarkMode: isDarkMode,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const AboutAppScreen()),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -238,42 +520,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const SizedBox(height: 40),
 
             // 4. TOMBOL LOG OUT
-            InkWell(
-              onTap: () {
-                // TODO: Tambahkan logika fungsi Log Out di sini
-              },
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: logoutBgColor,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: logoutColor.withValues(alpha: 0.5),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.logout_rounded,
-                      color: logoutColor,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Log Out',
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: logoutColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            LogoutButton(
+              isDarkMode: isDarkMode,
+              logoutColor: logoutColor,
+              logoutBgColor: logoutBgColor,
             ),
             const SizedBox(height: 40),
           ],
@@ -317,7 +567,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             child: Icon(
               icon,
-              color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C),
+              color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
               size: 24,
             ),
           ),
@@ -348,8 +598,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: Colors.white,
-            activeTrackColor: const Color(0xFF2B3A8C),
+            activeThumbColor: Theme.of(context).colorScheme.onPrimary,
+            activeTrackColor: Theme.of(context).colorScheme.primary,
             inactiveThumbColor: isDarkMode ? Colors.grey.shade400 : Colors.white,
             inactiveTrackColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
           ),
@@ -365,9 +615,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required Color iconBgColor,
     required Color textColor,
     required bool isDarkMode,
+    VoidCallback? onTap,
   }) {
     return InkWell(
-      onTap: () {}, // Tambahkan navigasi jika diperlukan
+      onTap: onTap,
       borderRadius: BorderRadius.circular(24),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -381,7 +632,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               child: Icon(
                 icon,
-                color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C),
+                color: isDarkMode ? Colors.white : Theme.of(context).colorScheme.primary,
                 size: 24,
               ),
             ),

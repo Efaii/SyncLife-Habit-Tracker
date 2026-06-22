@@ -1,24 +1,48 @@
+import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import '../logs/log_repository.dart';
 import '../habits/habit_repository.dart';
+import '../../models/log_model.dart';
+import '../../models/habit_model.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PredictionResult {
   final double percentage;
   final String insightText;
+  final int loggedDaysCount;
 
-  PredictionResult(this.percentage, this.insightText);
+  const PredictionResult(this.percentage, this.insightText, {this.loggedDaysCount = 7});
 }
 
-final predictionProvider = FutureProvider<PredictionResult>((ref) async {
-  final logRepo = ref.watch(logRepositoryProvider);
-  final logs = await logRepo.getLogs();
-  final habitRepo = ref.watch(habitRepositoryProvider);
-  final habits = await habitRepo.getHabits();
+class _PredictionData {
+  final List<LogModel> logs;
+  final List<HabitModel> habits;
 
-  if (logs.length < 5) {
-    return PredictionResult(
-      50.0,
-      'Data sedang dikumpulkan. Tetap konsisten untuk mengaktifkan prediksi cerdas!',
+  const _PredictionData(this.logs, this.habits);
+}
+
+PredictionResult _calculatePredictionIsolate(_PredictionData data) {
+  final allLogs = data.logs;
+  final habits = data.habits;
+
+  final activeHabitIds = habits.map((h) => h.idHabit).toSet();
+  final logs = allLogs.where((log) => activeHabitIds.contains(log.idHabit)).toList();
+
+  final loggedDays = logs.map((l) {
+    if (l.timestamp != null) {
+      return DateTime(l.timestamp!.year, l.timestamp!.month, l.timestamp!.day);
+    }
+    return null;
+  }).whereType<DateTime>().toSet();
+
+  final int loggedDaysCount = loggedDays.length;
+
+  if (loggedDaysCount == 0) {
+    return const PredictionResult(
+      0.0,
+      'Mulai centang habit pertamamu hari ini untuk melatih AI.',
+      loggedDaysCount: 0,
     );
   }
 
@@ -35,16 +59,25 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
       }).toList();
 
       final completedToday =
-          todayLogs.map((e) => e.idHabit).toSet().length;
+          todayLogs.where((e) => e.idHabit != null).map((e) => e.idHabit).toSet().length;
 
       final totalHabits = habits.length;
 
       final focusScore = totalHabits == 0
           ? 0
           : ((completedToday / totalHabits) * 100);
-  
+
+  final recentLog = logs.first;
+
+  int daysMissed = 0;
+  if (recentLog.timestamp != null) {
+    final lastLogDate = DateTime(recentLog.timestamp!.year, recentLog.timestamp!.month, recentLog.timestamp!.day);
+    final todayDate = DateTime(now.year, now.month, now.day);
+    daysMissed = todayDate.difference(lastLogDate).inDays;
+  }
+
   // Last recorded mood
-  final int lastMood = logs.isNotEmpty ? logs.first.moodLevel : 3;
+  final int lastMood = recentLog.moodLevel;
 
   int totalSuccess = 0;
   int totalFail = 0;
@@ -57,6 +90,10 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
 
   int successOnMood = 0;
   int failOnMood = 0;
+
+  final int lastBusy = recentLog.busyLevel;
+  int successOnBusy = 0;
+  int failOnBusy = 0;
 
   for (var log in logs) {
     bool isSuccess = log.status;
@@ -96,55 +133,146 @@ final predictionProvider = FutureProvider<PredictionResult>((ref) async {
         failOnMood++;
       }
     }
+
+    // Busy
+    if (log.busyLevel == lastBusy) {
+      if (isSuccess) {
+        successOnBusy++;
+      } else {
+        failOnBusy++;
+      }
+    }
   }
 
   final int totalLogs = totalSuccess + totalFail;
-  if (totalLogs == 0) return PredictionResult(50.0, 'Belum ada data.');
+  if (totalLogs == 0) return const PredictionResult(0.0, 'Belum ada cukup data untuk prediksi hari ini.');
 
-  // Prior Probabilities
-  double priorSuccess = totalSuccess / totalLogs;
-  double priorFail = totalFail / totalLogs;
+  // Alpha = 1.0 (Laplace smoothing parameter)
+  double alpha = 1.0;
+
+  // Prior Probabilities with Laplace Smoothing (2 classes: Success and Fail)
+  double priorSuccess = (totalSuccess + alpha) / (totalLogs + (alpha * 2));
+  double priorFail = (totalFail + alpha) / (totalLogs + (alpha * 2));
 
   // Likelihoods with Laplace Smoothing
-  // Day (7 states), Time (2 states), Mood (5 states)
-  double lDaySuccess = (successOnDay + 1) / (totalSuccess + 7);
-  double lDayFail = (failOnDay + 1) / (totalFail + 7);
+  // Day (7 states), Time (2 states), Mood (5 states), Busy (5 states)
+  double lDaySuccess = (successOnDay + alpha) / (totalSuccess + (alpha * 7));
+  double lDayFail = (failOnDay + alpha) / (totalFail + (alpha * 7));
 
-  double lTimeSuccess = (successOnTime + 1) / (totalSuccess + 2);
-  double lTimeFail = (failOnTime + 1) / (totalFail + 2);
+  double lTimeSuccess = (successOnTime + alpha) / (totalSuccess + (alpha * 2));
+  double lTimeFail = (failOnTime + alpha) / (totalFail + (alpha * 2));
 
-  double lMoodSuccess = (successOnMood + 1) / (totalSuccess + 5);
-  double lMoodFail = (failOnMood + 1) / (totalFail + 5);
+  double lMoodSuccess = (successOnMood + alpha) / (totalSuccess + (alpha * 5));
+  double lMoodFail = (failOnMood + alpha) / (totalFail + (alpha * 5));
 
-  // Posterior Probabilities
-  double postSuccess = priorSuccess * lDaySuccess * lTimeSuccess * lMoodSuccess;
-  double postFail = priorFail * lDayFail * lTimeFail * lMoodFail;
+  double lBusySuccess = (successOnBusy + alpha) / (totalSuccess + (alpha * 5));
+  double lBusyFail = (failOnBusy + alpha) / (totalFail + (alpha * 5));
 
-  double percentage = focusScore.toDouble();
+  // Posterior Probabilities (Raw Scores)
+  double rawSuccessScore = priorSuccess * lDaySuccess * lTimeSuccess * lMoodSuccess * lBusySuccess;
+  double rawFailureScore = priorFail * lDayFail * lTimeFail * lMoodFail * lBusyFail;
 
-    if (postSuccess + postFail > 0) {
-      final aiScore =
-          (postSuccess / (postSuccess + postFail)) * 100;
+  double percentage = 0.0;
 
-          percentage = ((focusScore * 0.7) +
-              (aiScore * 0.3));
-
-          percentage = percentage.clamp(0.0, 100.0).toDouble();
+  if (rawSuccessScore + rawFailureScore > 0) {
+    double probability = rawSuccessScore / (rawSuccessScore + rawFailureScore);
+    
+    // Implementasi Time Decay (Momentum Inactivity)
+    if (daysMissed > 1) {
+      double decayFactor = pow(0.8, daysMissed - 1).toDouble();
+      probability = probability * decayFactor;
     }
-
-  // Insight Generation (Identify the lowest likelihood factor for success)
-  String insightText = 'Insight: Anda berada di jalur yang tepat! Pertahankan kebiasaan baik ini.';
-  
-  if (lMoodSuccess < lDaySuccess && lMoodSuccess < lTimeSuccess) {
-    insightText = 'Insight: Mood Anda saat ini berpotensi menurunkan peluang sukses. Tetap semangat dan jangan menyerah!';
-  } else if (lTimeSuccess < lDaySuccess && lTimeSuccess < lMoodSuccess) {
-    String timeStr = isMorning ? 'Pagi' : 'Sore/Malam';
-    insightText = 'Insight: Anda biasanya kurang produktif di waktu $timeStr. Cobalah ubah strategi Anda!';
-  } else if (lDaySuccess < lTimeSuccess && lDaySuccess < lMoodSuccess) {
-    List<String> days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
-    String dayStr = days[currentDay - 1];
-    insightText = 'Insight: Hari $dayStr tampaknya menjadi tantangan buat Anda. Fokus lebih ekstra hari ini!';
+    
+    percentage = (probability * 100).clamp(0.0, 100.0).toDouble();
   }
 
-  return PredictionResult(percentage, insightText);
+  // Insight Generation
+  String insightText = '';
+
+  String getMoodText(int level) {
+    switch (level) {
+      case 1: return 'Sangat Buruk';
+      case 2: return 'Buruk';
+      case 3: return 'Netral';
+      case 4: return 'Baik';
+      case 5: return 'Sangat Baik';
+      default: return 'Netral';
+    }
+  }
+
+  String getBusyText(int level) {
+    switch (level) {
+      case 1: return 'Santai';
+      case 2: return 'Sedang';
+      case 3: return 'Sangat Sibuk';
+      default: return 'Sedang';
+    }
+  }
+
+  final moodStr = getMoodText(lastMood);
+  final busyStr = getBusyText(lastBusy);
+  
+  final bool isBadConditions = lastMood <= 2 || lastBusy == 3;
+  final bool isGoodConditions = !isBadConditions;
+  
+  if (percentage >= 70.0) {
+    if (isBadConditions) {
+      insightText = 'Luar biasa! Meski mood sedang **$moodStr** dan jadwal **$busyStr**, rekam jejakmu membuktikan kamu tetap tangguh. Pertahankan fokusmu!';
+    } else {
+      insightText = 'Peluang suksesmu ${percentage.toStringAsFixed(0)}%. Dengan mood **$moodStr** dan jadwal yang **$busyStr**, ini adalah momentum sempurna untuk produktif!';
+    }
+  } else if (percentage < 40.0) {
+    if (isGoodConditions) {
+      insightText = 'Peluang masa lalu rendah, tapi mumpung mood sedang **$moodStr**, jadikan ini energi untuk mendobrak kebiasaan buruk!';
+    } else {
+      insightText = 'Kondisi jadwal **$busyStr** dan mood **$moodStr** memang berat. Tidak apa-apa, turunkan ekspektasi dan fokus 1 langkah kecil hari ini.';
+    }
+  } else {
+    insightText = 'Peluangmu ${percentage.toStringAsFixed(0)}%. Di tengah jadwal **$busyStr** dan mood **$moodStr**, fokus selesaikan 1-2 habit prioritas.';
+  }
+
+  return PredictionResult(percentage, insightText, loggedDaysCount: loggedDaysCount);
+}
+
+final predictionProvider = FutureProvider<PredictionResult>((ref) async {
+  final habitRepo = ref.watch(habitRepositoryProvider);
+  final habits = await habitRepo.getHabits();
+  
+  if (habits.isEmpty) {
+    return const PredictionResult(
+      0.0, 
+      'Mulai centang habit pertamamu hari ini untuk melatih AI.', 
+      loggedDaysCount: 0,
+    );
+  }
+
+  final now = DateTime.now();
+  final sevenDaysAgo = now.subtract(const Duration(days: 7));
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  
+  if (userId == null) {
+    return const PredictionResult(0.0, 'Silakan login untuk melihat prediksi.', loggedDaysCount: 0);
+  }
+
+  final response = await Supabase.instance.client
+      .from('logs')
+      .select()
+      .eq('user_id', userId)
+      .not('habit_name', 'is', null)
+      .gte('timestamp', sevenDaysAgo.toIso8601String())
+      .lte('timestamp', now.toIso8601String())
+      .order('timestamp', ascending: false);
+
+  final recentLogs = response.map((json) => LogModel.fromJson(json)).toList();
+
+  if (recentLogs.isEmpty) {
+    return const PredictionResult(
+      0.0,
+      'Belum ada data 7 hari terakhir. Mulai catat habit untuk melatih AI.',
+      loggedDaysCount: 0,
+    );
+  }
+
+  // Jalankan kalkulasi berat di background isolate
+  return await compute(_calculatePredictionIsolate, _PredictionData(recentLogs, habits));
 });

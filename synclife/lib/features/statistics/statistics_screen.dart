@@ -4,7 +4,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../logs/log_repository.dart';
 import '../habits/habit_repository.dart';
-import '../../core/constants/providers/theme_provider.dart';
+import '../../models/habit_model.dart';
+import '../../utils/ui_helper.dart';
+import 'habit_history_screen.dart';
+import '../home/dashboard_screen.dart';
 
 // Composite class to hold statistics
 class StatisticsData {
@@ -15,6 +18,9 @@ class StatisticsData {
   final double avgMood;
   final double successRate;
   final String smartInsight;
+  final List<HabitModel> habits; 
+  final Map<String, int> habitCounts;
+  final Map<String, int> habitStreaks;
 
   StatisticsData({
     required this.currentStreak,
@@ -24,6 +30,9 @@ class StatisticsData {
     required this.avgMood,
     required this.successRate,
     required this.smartInsight,
+    required this.habits,
+    required this.habitCounts,
+    required this.habitStreaks,
   });
 }
 
@@ -31,8 +40,11 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
   final logRepo = ref.watch(logRepositoryProvider);
   final habitRepo = ref.watch(habitRepositoryProvider);
 
-  final logs = await logRepo.getLogs();
-  final habits = await habitRepo.getHabits();
+  final allLogs = await logRepo.getLogs();
+  final habits = await ref.watch(habitsProvider.future);
+
+  final activeHabitIds = habits.map((h) => h.idHabit).toSet();
+  final logs = allLogs.where((log) => activeHabitIds.contains(log.idHabit)).toList();
 
   if (logs.isEmpty) {
     return StatisticsData(
@@ -41,22 +53,55 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
       weeklyConsistency: List.filled(7, 0),
       avgMood: 0,
       successRate: 0,
-      smartInsight: 'Mulai kerjakan habitmu untuk mendapatkan insight personal!',
+      smartInsight: 'Belum ada data kebiasaan di periode ini. Mulai selesaikan habitmu agar AI dapat menganalisis polamu!',
+      habits: habits,
+      habitCounts: {},
+      habitStreaks: {},
     );
   }
 
   // 1. Top Habit
   final habitCounts = <String, int>{};
+  final habitLatestLog = <String, DateTime>{};
+
   for (var log in logs) {
-    if (log.status) {
-      habitCounts[log.idHabit] = (habitCounts[log.idHabit] ?? 0) + 1;
+    if (log.status && log.idHabit != null) {
+      final id = log.idHabit!;
+      habitCounts[id] = (habitCounts[id] ?? 0) + 1;
+      
+      if (log.timestamp != null) {
+        if (!habitLatestLog.containsKey(id) || log.timestamp!.isAfter(habitLatestLog[id]!)) {
+          habitLatestLog[id] = log.timestamp!;
+        }
+      }
     }
   }
+
   String topHabitName = 'Belum Ada Data';
   if (habitCounts.isNotEmpty) {
-    var topEntry = habitCounts.entries.reduce((a, b) => a.value > b.value ? a : b);
-    var topHabit = habits.where((h) => h.idHabit == topEntry.key).firstOrNull;
-    if (topHabit != null) topHabitName = topHabit.namaHabit;
+    var entries = habitCounts.entries.toList();
+    entries.sort((a, b) {
+      final countCompare = b.value.compareTo(a.value);
+      if (countCompare != 0) return countCompare; // Sort by completions descending
+      
+      // Tie-breaker: sort by last completed timestamp descending
+      final dateA = habitLatestLog[a.key] ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dateB = habitLatestLog[b.key] ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dateB.compareTo(dateA);
+    });
+    
+    for (var entry in entries) {
+      var topHabit = habits.where((h) => h.idHabit == entry.key).firstOrNull;
+      if (topHabit != null) {
+        topHabitName = topHabit.namaHabit;
+        break;
+      }
+    }
+    if (topHabitName == 'Belum Ada Data') {
+      topHabitName = 'Belum ada data';
+    }
+  } else {
+    topHabitName = 'Belum ada data';
   }
 
   // 2. Weekly Consistency
@@ -89,10 +134,36 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
     }
   }
 
-  // 4. Top Productive Day
+  final habitStreaks = <String, int>{};
+  for (var habitId in activeHabitIds) {
+    if (habitId == null) continue;
+    int streak = 0;
+    for (int i = 0; i < 365; i++) {
+      final checkDate = todayStart.subtract(Duration(days: i));
+      final hasLog = logs.any((l) => l.idHabit == habitId && l.status && l.timestamp != null && 
+        DateTime(l.timestamp!.year, l.timestamp!.month, l.timestamp!.day).isAtSameMomentAs(checkDate));
+      if (hasLog) {
+        streak++;
+      } else {
+        if (i == 0) continue; 
+        break;
+      }
+    }
+    habitStreaks[habitId] = streak;
+  }
+
+  // Filter logs for the current 7-day period shown in the chart
+  final currentPeriodLogs = logs.where((log) {
+    if (log.timestamp == null) return false;
+    final logDate = DateTime(log.timestamp!.year, log.timestamp!.month, log.timestamp!.day);
+    final difference = todayStart.difference(logDate).inDays;
+    return difference >= 0 && difference < 7;
+  }).toList();
+
+  // 4. Top Productive Day (Only for current period)
   String? topProductiveDay;
   final dayCounts = <int, int>{};
-  for (var log in logs) {
+  for (var log in currentPeriodLogs) {
     if (log.status && log.timestamp != null) {
       dayCounts[log.timestamp!.weekday] = (dayCounts[log.timestamp!.weekday] ?? 0) + 1;
     }
@@ -113,30 +184,71 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
       : moodLogs.map((l) => l.moodLevel).reduce((a, b) => a + b) / moodLogs.length;
 
   // 6. Success Rate
-  final totalLogs = logs.length;
-  final successLogs = logs.where((l) => l.status).length;
-  final successRate = totalLogs == 0 ? 0.0 : (successLogs / totalLogs) * 100;
+  final completedToday = logs.where((l) => 
+    l.status && 
+    l.idHabit != null && 
+    l.timestamp != null && 
+    l.timestamp!.year == now.year &&
+    l.timestamp!.month == now.month &&
+    l.timestamp!.day == now.day
+  ).map((e) => e.idHabit).toSet().length;
 
-  // 7. Smart Insight berdasarkan mood & busy level
+  final totalActiveHabits = activeHabitIds.length;
+  final successRate = totalActiveHabits == 0 ? 0.0 : (completedToday / totalActiveHabits) * 100;
+
+  // 7. Smart Insight berdasarkan mood & busy level dominan
   String smartInsight;
-  final avgBusy = logs.isEmpty
-      ? 0.0
-      : logs.map((l) => l.busyLevel).reduce((a, b) => a + b) / logs.length;
-
-  if (avgMood >= 4 && avgBusy <= 2) {
-    smartInsight = 'Mood kamu bagus dan jadwal santai! Ini waktu terbaik untuk menambah habit baru. 🚀';
-  } else if (avgMood >= 4 && avgBusy >= 3) {
-    smartInsight = 'Kamu produktif meski sibuk! Kamu punya mental yang kuat. 💪';
-  } else if (avgMood <= 2 && avgBusy >= 3) {
-    smartInsight = 'Kamu sedang sibuk dan mood kurang baik. Kurangi beban dan fokus habit prioritas. 🎯';
-  } else if (avgMood <= 2) {
-    smartInsight = 'Mood kamu sedang rendah. Coba mulai dengan habit kecil yang menyenangkan! 😊';
-  } else if (successRate >= 80) {
-    smartInsight = 'Konsistensimu luar biasa! Success rate ${successRate.toStringAsFixed(0)}%. Pertahankan! 🏆';
-  } else if (topProductiveDay != null) {
-    smartInsight = 'Kamu paling produktif di hari $topProductiveDay. Jadwalkan habit penting di hari itu! 📅';
+  
+  if (currentPeriodLogs.isEmpty) {
+    smartInsight = 'Belum ada data kebiasaan di periode ini. Mulai selesaikan habitmu agar AI dapat menganalisis polamu!';
   } else {
-    smartInsight = 'Terus semangat! Setiap langkah kecil membawamu lebih dekat ke tujuan. ⭐';
+    String getMoodText(int level) {
+      switch (level) {
+        case 1: return 'Sangat Buruk';
+        case 2: return 'Buruk';
+        case 3: return 'Netral';
+        case 4: return 'Baik';
+        case 5: return 'Sangat Baik';
+        default: return 'Netral';
+      }
+    }
+
+    String getBusyText(int level) {
+      switch (level) {
+        case 1: return 'Santai';
+        case 2: return 'Sedang';
+        case 3: return 'Sangat Sibuk';
+        default: return 'Sedang';
+      }
+    }
+
+    final completedPeriodLogs = currentPeriodLogs.where((l) => l.status).toList();
+
+    if (completedPeriodLogs.isNotEmpty && topProductiveDay != null) {
+      final moodFreq = <int, int>{};
+      final busyFreq = <int, int>{};
+      
+      for (var l in completedPeriodLogs) {
+        moodFreq[l.moodLevel] = (moodFreq[l.moodLevel] ?? 0) + 1;
+        busyFreq[l.busyLevel] = (busyFreq[l.busyLevel] ?? 0) + 1;
+      }
+      
+      final dominantMood = moodFreq.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+      final dominantBusy = busyFreq.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+      
+      final moodStr = getMoodText(dominantMood);
+      final busyStr = getBusyText(dominantBusy);
+      
+      if (dominantBusy == 3 && dominantMood >= 4) {
+        smartInsight = 'Energimu luar biasa! Di hari $topProductiveDay, kamu mencapai puncak produktivitas saat jadwal **$busyStr**, namun tetap bisa menjaga mood **$moodStr**.';
+      } else if (dominantMood <= 2 || dominantBusy == 3) {
+        smartInsight = 'Luar biasa! Kamu paling produktif di hari $topProductiveDay. Ketangguhanmu terbukti, karena meskipun jadwal sedang **$busyStr** dan mood **$moodStr**, kamu tetap bisa menyelesaikan target!';
+      } else {
+        smartInsight = 'Data menunjukkan kamu paling produktif di hari $topProductiveDay, didukung oleh ritme jadwal yang **$busyStr** dan kondisi mood yang **$moodStr**.';
+      }
+    } else {
+      smartInsight = 'Terus semangat! Setiap langkah kecil membawamu lebih dekat ke tujuan.';
+    }
   }
 
   return StatisticsData(
@@ -147,6 +259,9 @@ final statisticsProvider = FutureProvider<StatisticsData>((ref) async {
     avgMood: avgMood,
     successRate: successRate,
     smartInsight: smartInsight,
+    habits: habits,
+    habitCounts: habitCounts,
+    habitStreaks: habitStreaks,
   );
 });
 
@@ -158,10 +273,11 @@ class StatisticsScreen extends ConsumerWidget {
     final statsAsync = ref.watch(statisticsProvider);
 
     // --- LOGIKA THEME DITAMBAHKAN DI SINI ---
-    final isDarkMode = ref.watch(themeProvider) == ThemeMode.dark;
-    final backgroundColor = isDarkMode ? const Color(0xFF121212) : const Color(0xFFEEF2FF);
-    final cardColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    final backgroundColor = theme.scaffoldBackgroundColor;
+    final cardColor = theme.cardColor;
+    final textColor = theme.colorScheme.onSurface;
     final subtitleColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
 
     return Scaffold(
@@ -171,7 +287,7 @@ class StatisticsScreen extends ConsumerWidget {
           'Statistik',
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.bold,
-            color: isDarkMode ? Colors.white : const Color(0xFF2B3A8C), 
+            color: isDarkMode ? Colors.white : theme.colorScheme.primary,
             fontSize: 26,
           ),
         ),
@@ -181,9 +297,17 @@ class StatisticsScreen extends ConsumerWidget {
       ),
       body: statsAsync.when(
         data: (stats) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-            child: Column(
+          return RefreshIndicator(
+            color: theme.colorScheme.primary,
+            onRefresh: () async {
+              ref.invalidate(statisticsProvider);
+              ref.invalidate(habitsProvider);
+              await Future.delayed(const Duration(milliseconds: 500));
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 10),
@@ -218,7 +342,7 @@ class StatisticsScreen extends ConsumerWidget {
                         value: stats.topHabitName,
                         subtitle: 'Paling konsisten',
                         icon: Icons.emoji_events_rounded,
-                        color: Colors.amber,
+                        color: stats.topHabitName == 'Belum ada data' ? theme.disabledColor : Colors.amber,
                         isTextSmall: stats.topHabitName.length > 10,
                         cardColor: cardColor,
                         textColor: textColor, 
@@ -249,14 +373,26 @@ class StatisticsScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildInsightsCard(stats.topProductiveDay, stats.smartInsight, stats.successRate),
+                _buildInsightsCard(stats.topProductiveDay, stats.smartInsight, stats.successRate, context, cardColor, textColor),
+                const SizedBox(height: 32),
+                Text(
+                  'Analisis Habit Spesifik',
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildHabitsPerformanceList(stats.habits, stats.habitCounts, context, cardColor, textColor, subtitleColor, isDarkMode),
                 const SizedBox(height: 40),
               ],
+            ),
             ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
-        error: (error, _) => Center(child: Text('Error loading stats: $error', style: TextStyle(color: textColor))), // Warna pesan error dinamis
+        error: (error, _) => Center(child: Text('Gagal memuat statistik. Periksa koneksi Anda.', style: TextStyle(color: textColor))), // Warna pesan error dinamis
       ),
     );
   }
@@ -287,35 +423,33 @@ class StatisticsScreen extends ConsumerWidget {
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [color.withValues(alpha: 0.15), color.withValues(alpha: 0.25)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              color: color.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 28),
           ),
-          const SizedBox(height: 16),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
+          const SizedBox(height: 8),
+          Flexible(
             child: Text(
               value,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.outfit(
-                fontSize: 26,
+                fontSize: isTextSmall ? 20 : 24,
                 fontWeight: FontWeight.bold,
                 color: textColor, 
               ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
@@ -338,78 +472,8 @@ class StatisticsScreen extends ConsumerWidget {
 
   // MENERIMA PARAMETER TAMBAHAN UNTUK WARNA
   Widget _buildBarChart(List<int> weeklyData, BuildContext context, Color cardColor, Color textColor, Color subtitleColor, bool isDarkMode) {
-    final bool isEmpty = weeklyData.every((v) => v == 0);
-
-    if (isEmpty) {
-      return Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 250),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: cardColor, 
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 15,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2B3A8C).withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.bar_chart_rounded,
-                size: 48,
-                color: Color(0xFF2B3A8C),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Belum Ada Data',
-              style: GoogleFonts.outfit(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Selesaikan habit harianmu\nuntuk melihat konsistensimu di sini!',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: subtitleColor,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2B3A8C).withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '🎯 Mulai hari ini!',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF2B3A8C),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    final theme = Theme.of(context);
+    // Render the chart even if weeklyData is all zeros, allowing the empty grid to be displayed.
 
     int maxY = weeklyData.reduce((a, b) => a > b ? a : b);
     if (maxY == 0) maxY = 5;
@@ -446,11 +510,11 @@ class StatisticsScreen extends ConsumerWidget {
           barTouchData: BarTouchData(
             enabled: true,
             touchTooltipData: BarTouchTooltipData(
-              getTooltipColor: (_) => const Color(0xFF2B3A8C),
+              getTooltipColor: (_) => theme.colorScheme.primary,
               getTooltipItem: (group, groupIndex, rod, rodIndex) {
                 return BarTooltipItem(
                   '${rod.toY.round()} Habits',
-                  GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
+                  GoogleFonts.inter(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold),
                 );
               },
             ),
@@ -469,7 +533,7 @@ class StatisticsScreen extends ConsumerWidget {
                         shiftedDays[index],
                         style: GoogleFonts.inter(
                           color: shiftedDays[index] == days[todayIndex]
-                                ? const Color(0xFF2B3A8C)
+                                ? theme.colorScheme.primary
                                 : subtitleColor, 
                           fontWeight: shiftedDays[index] == days[todayIndex]
                                 ? FontWeight.bold
@@ -508,8 +572,8 @@ class StatisticsScreen extends ConsumerWidget {
                 BarChartRodData(
                   toY: weeklyData[index].toDouble(),
                   color: shiftedDays[index] == days[todayIndex]
-                    ? const Color(0xFF2B3A8C)
-                    : const Color(0xFF2B3A8C).withValues(alpha: 0.5),
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.primary.withValues(alpha: 0.5),
                   width: 16,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                   backDrawRodData: BackgroundBarChartRodData(
@@ -526,8 +590,29 @@ class StatisticsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildInsightsCard(String? topDay, String smartInsight, double successRate) {
+  Widget _buildFormattedText(String text, TextStyle? baseStyle) {
+    if (baseStyle == null) return Text(text);
+    final parts = text.split('**');
+    return RichText(
+      text: TextSpan(
+        style: baseStyle,
+        children: parts.asMap().entries.map((entry) {
+          final index = entry.key;
+          final part = entry.value;
+          final isBold = index % 2 != 0; 
+          return TextSpan(
+            text: part,
+            style: isBold ? baseStyle.copyWith(fontWeight: FontWeight.bold) : baseStyle,
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildInsightsCard(String? topDay, String smartInsight, double successRate, BuildContext context, Color cardColor, Color textColor) {
   final hasData = topDay != null;
+  final theme = Theme.of(context);
+  final isDarkMode = theme.brightness == Brightness.dark;
 
   return Column(
     children: [
@@ -536,20 +621,21 @@ class StatisticsScreen extends ConsumerWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: hasData
-                ? [const Color(0xFF2B3A8C), const Color(0xFF1A237E)]
-                : [Colors.grey.shade400, Colors.grey.shade600],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: hasData ? theme.colorScheme.primary : cardColor,
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
-            BoxShadow(
-              color: (hasData ? const Color(0xFF2B3A8C) : Colors.grey).withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
+            if (hasData)
+              BoxShadow(
+                color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              )
+            else
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDarkMode ? 0.3 : 0.04),
+                blurRadius: 15,
+                offset: const Offset(0, 8),
+              ),
           ],
         ),
         child: Row(
@@ -557,17 +643,17 @@ class StatisticsScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: hasData ? theme.colorScheme.onPrimary.withValues(alpha: 0.1) : theme.colorScheme.primary.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 32),
+              child: Icon(Icons.auto_awesome_rounded, color: hasData ? theme.colorScheme.onPrimary : theme.colorScheme.primary, size: 32),
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
+              child: _buildFormattedText(
                 smartInsight,
-                style: GoogleFonts.inter(
-                  color: Colors.white,
+                theme.textTheme.bodyMedium?.copyWith(
+                  color: hasData ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                   height: 1.5,
@@ -584,11 +670,11 @@ class StatisticsScreen extends ConsumerWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: cardColor,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
+                color: Colors.black.withValues(alpha: isDarkMode ? 0.3 : 0.04),
                 blurRadius: 15,
                 offset: const Offset(0, 8),
               ),
@@ -613,7 +699,7 @@ class StatisticsScreen extends ConsumerWidget {
                       'Success Rate',
                       style: GoogleFonts.inter(
                         fontSize: 13,
-                        color: Colors.grey.shade500,
+                        color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade500,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -623,7 +709,7 @@ class StatisticsScreen extends ConsumerWidget {
                       style: GoogleFonts.outfit(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                        color: textColor,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -648,4 +734,129 @@ class StatisticsScreen extends ConsumerWidget {
     ],
   );
 }
+
+  Widget _buildHabitsPerformanceList(List<HabitModel> habits, Map<String, int> counts, BuildContext context, Color cardColor, Color textColor, Color subtitleColor, bool isDarkMode) {
+    final theme = Theme.of(context);
+    
+    if (habits.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDarkMode ? 0.3 : 0.04),
+              blurRadius: 15,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(color: theme.colorScheme.primary.withValues(alpha: 0.08), shape: BoxShape.circle),
+              child: Icon(Icons.analytics_outlined, size: 48, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Belum ada data analisis habit.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: subtitleColor,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: habits.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final habit = habits[index];
+        final count = counts[habit.idHabit] ?? 0;
+        
+        Color habitColor = theme.colorScheme.primary;
+        if (habit.warnaTag.isNotEmpty) {
+          final buffer = StringBuffer();
+          if (habit.warnaTag.length == 6 || habit.warnaTag.length == 7) buffer.write('ff');
+          buffer.write(habit.warnaTag.replaceFirst('#', ''));
+          try {
+            habitColor = Color(int.parse(buffer.toString(), radix: 16));
+          } catch (_) {}
+        }
+
+        return InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => HabitHistoryScreen(habit: habit, color: habitColor)),
+            );
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDarkMode ? theme.colorScheme.onPrimary : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDarkMode ? Colors.white10 : Colors.grey.shade200,
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  height: 48,
+                  width: 48,
+                  decoration: BoxDecoration(
+                    color: habitColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: UIHelper.renderHabitIcon(habit.ikon, size: 24, color: habitColor),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        habit.namaHabit,
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          color: textColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Total selesai: $count kali',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: subtitleColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: subtitleColor),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
