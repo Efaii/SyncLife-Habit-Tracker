@@ -28,13 +28,17 @@ void main() async {
   }
 
   // Initialize Local Notifications
-  await NotificationService().init(
-    onDidReceiveNotificationResponse: (response) {
-      if (response.payload != null) {
-        navigatorKey.currentState?.pushNamed('/habit-detail', arguments: response.payload);
-      }
-    },
-  );
+  try {
+    await NotificationService().init(
+      onDidReceiveNotificationResponse: (response) {
+        if (response.payload != null) {
+          navigatorKey.currentState?.pushNamed('/habit-detail', arguments: response.payload);
+        }
+      },
+    );
+  } catch (e) {
+    debugPrint('Local Notifications Initialization Error: $e');
+  }
 
   // 1. CLEAN LOCAL STORAGE (Flutter Web Only)
   if (kIsWeb) {
@@ -98,7 +102,11 @@ void main() async {
   }
 
   // Initialize Global Locale Data for DateFormat
-  await DateFormattingService.initialize();
+  try {
+    await DateFormattingService.initialize();
+  } catch (e) {
+    debugPrint('Date Formatting Initialization Error: $e');
+  }
 
   runApp(
     const ProviderScope(
