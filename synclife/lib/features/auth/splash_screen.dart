@@ -34,29 +34,43 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _navigateToNextScreen() async {
-    // Precache logos into memory while waiting
-    const darkLoader = SvgAssetLoader('assets/images/Logo SyncLife Dark.svg');
-    const lightLoader = SvgAssetLoader('assets/images/Logo SyncLife Light.svg');
-    svg.cache.putIfAbsent(darkLoader.cacheKey(null), () => darkLoader.loadBytes(null));
-    svg.cache.putIfAbsent(lightLoader.cacheKey(null), () => lightLoader.loadBytes(null));
+    try {
+      // Precache logos into memory while waiting
+      const darkLoader = SvgAssetLoader('assets/images/Logo SyncLife Dark.svg');
+      const lightLoader = SvgAssetLoader('assets/images/Logo SyncLife Light.svg');
+      svg.cache.putIfAbsent(darkLoader.cacheKey(null), () => darkLoader.loadBytes(null));
+      svg.cache.putIfAbsent(lightLoader.cacheKey(null), () => lightLoader.loadBytes(null));
+    } catch (e) {
+      debugPrint('Precaching logos failed: $e');
+    }
 
     // Wait for 2 seconds
     await Future.delayed(const Duration(seconds: 2));
 
     if (!mounted) return;
 
-    // Check auth status
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session != null) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
+    try {
+      // Check auth status
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const MainScreen()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
+    } catch (e) {
+      debugPrint('Navigation/Auth check failed, redirecting to Login: $e');
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
     }
   }
 
